@@ -2,7 +2,7 @@ SYSTEMTAP EXAMPLES INDEX BY KEYWORD
 (see also index.txt)
 
 
-For systemtap version 5.1.
+For systemtap version 5.4.
 
 = _BEST =
 
@@ -1798,6 +1798,17 @@ keywords: memory
   # stap pfaults.stp -T 1
 
 
+memory/swapmonitor.stp - Summarize swap operations
+keywords: memory swap
+
+  The swapmonitor.stp script is an example to monitor "swap in/out" in
+  RHEL. This stap monitor the call of "swap_readpage" and
+  "swap_writepage", and then printf the timeframe, func, execname, pid
+  and the count with 10 seconds interval.
+
+  # stap swapmonitor.stp -T 5
+
+
 memory/vm.tracepoints.stp - Collect Slab Allocation Statistics
 keywords: memory statistics
 
@@ -1972,7 +1983,7 @@ keywords: network tracepoint socket
   Every five seconds the dropwatch.stp script lists the number of
   socket buffers freed at locations in the kernel.
 
-  # stap dropwatch.stp -T 1
+  # stap -d kernel dropwatch.stp -T 1
 
 
 network/net_xmit_json.stp - Tracks time between packet queue and transmit.
@@ -3457,7 +3468,7 @@ keywords: network tracepoint socket
   Every five seconds the dropwatch.stp script lists the number of
   socket buffers freed at locations in the kernel.
 
-  # stap dropwatch.stp -T 1
+  # stap -d kernel dropwatch.stp -T 1
 
 
 network/socket-trace.stp - Trace Functions Called in Network Socket Code
@@ -3677,6 +3688,19 @@ keywords: network statistics
   sorted and grouped by individual sockets.
 
   # stap tcpipstat.stp timeout=1
+
+
+= SWAP =
+
+memory/swapmonitor.stp - Summarize swap operations
+keywords: memory swap
+
+  The swapmonitor.stp script is an example to monitor "swap in/out" in
+  RHEL. This stap monitor the call of "swap_readpage" and
+  "swap_writepage", and then printf the timeframe, func, execname, pid
+  and the count with 10 seconds interval.
+
+  # stap swapmonitor.stp -T 5
 
 
 = SYSCALL =
@@ -4187,7 +4211,7 @@ keywords: network tracepoint socket
   Every five seconds the dropwatch.stp script lists the number of
   socket buffers freed at locations in the kernel.
 
-  # stap dropwatch.stp -T 1
+  # stap -d kernel dropwatch.stp -T 1
 
 
 process/cycle_thief.stp - Track IRQ's and Other Processes Stealing Cycles from a Task

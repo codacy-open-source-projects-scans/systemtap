@@ -17,7 +17,7 @@
 #include "task_finder.h"
 #include "translate.h"
 #include "session.h"
-#include "util.h"
+#include "staputil.h"
 #include "buildrun.h"
 #include "dwarf_wrappers.h"
 #include "hash.h"
@@ -739,13 +739,12 @@ dwflpp::getscopes_die(Dwarf_Die* die)
   vector<Dwarf_Die> scopes;
   Dwarf_Die *scope = die;
   auto it = parents->end();
-  do
+  while (scope != NULL)
     {
       scopes.push_back(*scope);
       it = parents->find(scope->addr);
-      scope = &it->second;
+      scope = (it != parents->end()) ? &it->second : NULL;
     }
-  while (it != parents->end());
 
 #ifdef DEBUG_DWFLPP_GETSCOPES
   Dwarf_Die *dscopes = NULL;
@@ -1210,7 +1209,24 @@ dwflpp::iterate_over_globals<void>(Dwarf_Die *cu_die,
     return DWARF_CB_OK;
 
   // If this is C++, recurse for any inner types
-  bool has_inner_types = dwarf_srclang(cu_die) == DW_LANG_C_plus_plus;
+  // PR32401 XXX: what other languages should be listed?
+  int srclang = dwarf_srclang(cu_die);
+  bool has_inner_types;
+  switch(srclang) {
+  case DW_LANG_C_plus_plus:
+  case DW_LANG_C_plus_plus_03:
+  case DW_LANG_C_plus_plus_11:
+  case DW_LANG_C_plus_plus_14:
+#if _ELFUTILS_PREREQ (0, 193) /* elfutils commit 04ba163e813f6b88 */
+  case DW_LANG_C_plus_plus_17:
+  case DW_LANG_C_plus_plus_20:    
+  case DW_LANG_C_plus_plus_23:
+#endif
+    has_inner_types = true;
+    break;
+  default:
+    has_inner_types = false;
+  }
 
   return iterate_over_types(cu_die, has_inner_types, "", callback, data);
 }
@@ -4410,8 +4426,9 @@ dwflpp::literal_stmt_for_pointer (location_context &ctx,
                                   Dwarf_Die *die_mem)
 {
   if (sess.verbose>2)
-      clog << _F("literal_stmt_for_pointer: finding value for %s (%s)\n",
-                  dwarf_type_name(start_typedie).c_str(), (dwarf_diename(cu) ?: "<unknown>"));
+    clog << _("literal_stmt_for_pointer: finding value for ") << *e->tok
+         << _F(" type %s (%s)\n",
+               dwarf_type_name(start_typedie).c_str(), (dwarf_diename(cu) ?: "<unknown>"));
 
   assert(ctx.pointer != NULL);
   location *tail = ctx.translate_argument (ctx.pointer);

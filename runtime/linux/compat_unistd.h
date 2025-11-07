@@ -490,6 +490,18 @@
 #ifndef __NR_pkey_mprotect
 #define __NR_pkey_mprotect (__NR_syscall_max + 1)
 #endif
+#ifndef __NR_file_getattr
+#define __NR_file_getattr (__NR_syscall_max + 1)
+#endif
+#ifndef __NR_file_setattr
+#define __NR_file_setattr (__NR_syscall_max + 1)
+#endif
+#ifndef __NR_lsm_get_self_attr
+#define __NR_lsm_get_self_attr (__NR_syscall_max + 1)
+#endif
+#ifndef __NR_lsm_set_self_attr
+#define __NR_lsm_set_self_attr (__NR_syscall_max + 1)
+#endif
 
 #if defined(__x86_64__)
 

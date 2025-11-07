@@ -342,7 +342,7 @@ __noendbr void ibt_restore(u64 save)
 #include "../regs.c"
 #include "regs-ia64.c"
 
-#if (defined(STAPCONF_UTRACE_VIA_TRACEPOINTS))
+#if (defined(STAPCONF_UTRACE_VIA_TRACEPOINTS) || defined(STAPCONF_UTRACE_VIA_TRACEPOINTS2))
 #define HAVE_TASK_FINDER
 #include "task_finder.c"
 #else
@@ -372,8 +372,8 @@ __noendbr void ibt_restore(u64 save)
 #ifdef STP_USE_DWARF_UNWINDER
 #include "unwind.c"
 #else
-/* We still need unwind.h for a few structures (unwind_context and
- * unwind_cache). */
+/* We still need unwind.h for a few structures (stp_unwind_context and
+ * stp_unwind_cache). */
 #include "unwind/unwind.h"
 #endif
 

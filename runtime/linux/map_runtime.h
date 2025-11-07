@@ -17,10 +17,10 @@
 
 
 struct pmap {
-	int bit_shift;	/* scale factor for integer arithmetic */
-	int stat_ops;	/* related statistical operators */
-	MAP agg;	/* aggregation map */
-	MAP *map;	/* per-cpu maps */
+	int bit_shift;		/* scale factor for integer arithmetic */
+	int stat_ops;		/* related statistical operators */
+	MAP agg;		/* aggregation map */
+	MAP __percpu *map;	/* per-cpu maps */
 };
 
 static inline MAP _stp_pmap_get_agg(PMAP p)
@@ -107,11 +107,10 @@ _stp_map_init(MAP m, unsigned max_entries, unsigned hash_table_mask,
 	INIT_MLIST_HEAD(&m->head);
 
         m->hash_table_mask = hash_table_mask;
-	for (i = 0; i <= hash_table_mask; i++)
-		INIT_MHLIST_HEAD(&m->hashes[i]);
-
 	m->maxnum = max_entries;
 	m->wrap = wrap;
+	for (i = 0; i <= hash_table_mask; i++)
+		INIT_MHLIST_HEAD(&m->hashes[i]);
 
 	/* Since we're using _stp_map_vzalloc(), we can afford to
 	 * allocate the nodes in one big chunk. */

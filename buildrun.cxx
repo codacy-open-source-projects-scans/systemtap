@@ -1,5 +1,5 @@
 // build/run probes
-// Copyright (C) 2005-2021 Red Hat Inc.
+// Copyright (C) 2005-2025 Red Hat Inc.
 //
 // This file is part of systemtap, and is free software.  You can
 // redistribute it and/or modify it under the terms of the GNU General
@@ -9,7 +9,7 @@
 #include "config.h"
 #include "buildrun.h"
 #include "session.h"
-#include "util.h"
+#include "staputil.h"
 #include "hash.h"
 #include "translate.h"
 
@@ -186,7 +186,7 @@ output_autoconf(systemtap_session& s, ofstream& o,
                 const char *deffalse)
 {
   autoconf_c_files.push_back (autoconf_c);
-  o << endl << s.tmpdir << "/" << autoconf_c << ".h:" << endl;
+  o << endl << "$(obj)/" << autoconf_c << ".h:" << endl;
   o << "\t";
   if (s.verbose < 4)
     o << "@";
@@ -286,7 +286,8 @@ compile_pass (systemtap_session& s)
   string makefile_nm = s.tmpdir + "/Makefile";
   ofstream o (makefile_nm.c_str());
 
-  string stap_export_nm = s.tmpdir + "/stapconf_export.h";
+  string stap_export_basenm = "stapconf_export.h";
+  string stap_export_nm = s.tmpdir + "/" + stap_export_basenm;
   ofstream o2 (stap_export_nm.c_str());
 
   // Create makefile
@@ -304,11 +305,17 @@ compile_pass (systemtap_session& s)
   // but flags= filter was removed from kernel scripts/Kbuild.include mid-2019
   o << "_KBUILD_CFLAGS := $(call flags,KBUILD_CFLAGS) $(KBUILD_CFLAGS)" << endl;
 
+  // Support deprecation of $(EXTRA_CFLAGS); replacement flag available since 3.18ish.
+  // See linux kernel commits f77bf01425b119 and e966ad0edd005 
+  string extra_cflags = "EXTRA_CFLAGS";
+  if (strverscmp (s.kernel_base_release.c_str(), "6.15") >= 0)
+    extra_cflags = "ccflags-y";
+  
   o << "stap_check_gcc = $(shell " << superverbose
     << " if $(CC) $(1) -S -o /dev/null -xc /dev/null > /dev/null 2>&1; then "
     << "echo \"$(1)\"; else echo \"$(2)\"; fi)" << endl;
   o << "CHECK_BUILD := $(CC) -DMODULE $(NOSTDINC_FLAGS) $(KBUILD_CPPFLAGS) $(CPPFLAGS) "
-    << "$(LINUXINCLUDE) $(_KBUILD_CFLAGS) $(CFLAGS_KERNEL) $(EXTRA_CFLAGS) "
+    << "$(LINUXINCLUDE) $(_KBUILD_CFLAGS) $(CFLAGS_KERNEL) $(" << extra_cflags << ") "
     << "$(CFLAGS) -DKBUILD_BASENAME=\\\"" << s.module_name << "\\\" "
     << "-Wmissing-prototypes "  // GCC14 prep, PR31288
     << "-Werror" << " -S -o /dev/null -xc " << endl;
@@ -322,7 +329,7 @@ compile_pass (systemtap_session& s)
   // RHBZ 543529: early rhel6 kernels' module-signing kbuild logic breaks out-of-tree modules
   o << "CONFIG_MODULE_SIG := n" << endl;
 
-  string module_cflags = "EXTRA_CFLAGS";
+  string module_cflags = extra_cflags;
   o << module_cflags << " :=" << endl;
 
   // XXX: This gruesome hack is needed on some kernels built with separate O=directory,
@@ -343,13 +350,9 @@ compile_pass (systemtap_session& s)
 
   o << module_cflags << " += -Wmissing-prototypes" << endl; // GCC14 prep, PR31288
   
-  o << "STAPCONF_HEADER := " << s.tmpdir << "/" << s.stapconf_name << endl;
-  o << ".DELETE_ON_ERROR: $(STAPCONF_HEADER)" << endl;
-  o << "$(STAPCONF_HEADER):" << endl;
-  o << "\t";
-  if (s.verbose < 4)
-    o << "@";
-  o << "$(MAKE) -f \"$(firstword $(MAKEFILE_LIST))\" gen-stapconf" << endl;
+  o << "STAPCONF_HEADER := " << "$(obj)/" << s.stapconf_name << endl;
+  // PR32607 check if the stapconf_HASH file is already present, i.e. reused from the cache.
+  // If os, then we don't need to emit any of the autoc
 
   vector<string> cs;  // to hold autoconf C file names
 
@@ -397,6 +400,9 @@ compile_pass (systemtap_session& s)
   output_autoconf(s, o, cs, "autoconf-514-panic.c", "STAPCONF_514_PANIC", NULL);
   output_autoconf(s, o, cs, "autoconf-task_work_cancel_func.c", "STAPCONF_TASK_WORK_CANCEL_FUNC", NULL);
   output_autoconf(s, o, cs, "autoconf-pr32194-uprobe-register-unregister.c", "STAPCONF_PR32194_UPROBE_REGISTER_UNREGISTER", NULL);
+  output_autoconf(s, o, cs, "autoconf-uprobes-cb-data.c", "STAPCONF_UPROBES_CB_DATA", NULL);
+  output_autoconf(s, o, cs, "autoconf-pr33324-prev_padding.c", "STAPCONF_PR33324_PREV_PADDING", NULL);
+  output_autoconf(s, o, cs, "autoconf-pr33574-pno-type.c", "STAPCONF_PR33574_PNO_TYPE", NULL);
   
   output_dual_exportconf(s, o2, "probe_kernel_read", "probe_kernel_write", "STAPCONF_PROBE_KERNEL");
   output_autoconf(s, o, cs, "autoconf-hw_breakpoint_context.c",
@@ -444,6 +450,7 @@ compile_pass (systemtap_session& s)
   output_autoconf(s, o, cs, "autoconf-module-sect-attrs.c", "STAPCONF_MODULE_SECT_ATTRS", NULL);
   output_autoconf(s, o, cs, "autoconf-kernel_read-new-args.c", "STAPCONF_KERNEL_READ_NEW_ARGS", NULL);
   output_autoconf(s, o, cs, "autoconf-utrace-via-tracepoints.c", "STAPCONF_UTRACE_VIA_TRACEPOINTS", NULL);
+  output_autoconf(s, o, cs, "autoconf-utrace-via-tracepoints2.c", "STAPCONF_UTRACE_VIA_TRACEPOINTS2", NULL);
   output_autoconf(s, o, cs, "autoconf-task_work-struct.c", "STAPCONF_TASK_WORK_STRUCT", NULL);
   output_autoconf(s, o, cs, "autoconf-twa_resume.c", "STAPCONF_TWA_RESUME", NULL);
   output_autoconf(s, o, cs, "autoconf-vm-area-pte.c", "STAPCONF_VM_AREA_PTE", NULL);
@@ -462,6 +469,7 @@ compile_pass (systemtap_session& s)
   output_autoconf(s, o, cs, "autoconf-time32.c", "STAPCONF_TIME32_H", NULL);
   output_autoconf(s, o, cs, "autoconf-time32-old.c", "STAPCONF_TIME32_OLD_H", NULL);
   output_autoconf(s, o, cs, "autoconf-compat-utimbuf.c", "STAPCONF_COMPAT_UTIMBUF", NULL);
+  output_exportconf(s, o2, "lookup_noperm", "STAPCONF_LOOKUP_NOPERM");
   
   // used by tapset/timestamp_monotonic.stp
   output_autoconf(s, o, cs, "autoconf-cpu-clock.c", "STAPCONF_CPU_CLOCK", NULL);
@@ -555,6 +563,12 @@ compile_pass (systemtap_session& s)
   output_autoconf(s, o, cs, "autoconf-files_lookup_fd_raw.c",
                   "STAPCONF_FILES_LOOKUP_FD_RAW", NULL);
   output_autoconf(s, o, cs, "autoconf-task-state.c", "STAPCONF_TASK_STATE", NULL);
+
+  output_autoconf(s, o, cs, "autoconf-linux-unaligned-h.c", "STAPCONF_LINUX_UNALIGNED_H", NULL);
+
+  output_autoconf(s, o, cs, "autoconf-hrtimer_init.c", "STAPCONF_HRTIMER_INIT", NULL);
+  output_autoconf(s, o, cs, "autoconf-del_timer_sync.c", "STAPCONF_DEL_TIMER_SYNC", NULL);
+
   
   // used by runtime/linux/netfilter.c
   output_exportconf(s, o2, "nf_register_hook", "STAPCONF_NF_REGISTER_HOOK");
@@ -567,24 +581,38 @@ compile_pass (systemtap_session& s)
 
   o2.close ();
 
-  o << ".PHONY: gen-stapconf" << endl;
-  o << "gen-stapconf: " << stap_export_nm;
-  for (unsigned i=0; i<cs.size(); i++)
-    o << " " << s.tmpdir << "/" << cs[i] << ".h";
-  o << endl;
-
-  o << "\t";
-  if (s.verbose < 4)
-    o << "@";
-  o << "cat $^ > $(STAPCONF_HEADER)" << endl;
-
+  // PR32607: check if the stapconf_HASH file is already present,
+  // i.e. reused from the cache, and emplaced by
+  // get_stapconf_from_cache().  If so, then we don't need to emit the
+  // autoconf dependency list here at all, thus the thing won't
+  // attempt to trigger repeated tests from the autoconf* deps listed
+  // above.
+  string stapconf_dest_path = s.tmpdir + "/" + s.stapconf_name;
+  ifstream flub (stapconf_dest_path);
+  if (flub.good()) {
+    // already computed
+  } else {
+    // PR32458 (!) Build the combined conf header as an ordinary
+    // dependency of the module.o file.  Don't invoke a sub-$(MAKE) with
+    // crude command line parsing.
+    o << "$(STAPCONF_HEADER): " << "$(obj)/" << stap_export_basenm;
+    for (unsigned i=0; i<cs.size(); i++)
+      o << " " << "$(obj)/" << cs[i] << ".h";
+    o << endl;
+    o << "\t";
+    if (s.verbose < 4)
+      o << "@";
+    o << "cat $^ > $(STAPCONF_HEADER)" << endl;
+  }
+  
+  o << "$(obj)/" << s.module_name <<".o : $(STAPCONF_HEADER)" << endl;
   o << module_cflags << " += -include $(STAPCONF_HEADER)" << endl;
 
   for (unsigned i=0; i<s.c_macros.size(); i++)
-    o << "EXTRA_CFLAGS += -D " << lex_cast_qstring(s.c_macros[i]) << endl; // XXX right quoting?
+    o << extra_cflags << " += -D " << lex_cast_qstring(s.c_macros[i]) << endl; // XXX right quoting?
 
   if (s.verbose > 3)
-    o << "EXTRA_CFLAGS += -ftime-report -Q" << endl;
+    o << extra_cflags << " += -ftime-report -Q" << endl;
 
   // XXX: unfortunately, -save-temps can't work since linux kbuild cwd
   // is not writable.
@@ -594,7 +622,7 @@ compile_pass (systemtap_session& s)
 
   // Kernels can be compiled with CONFIG_CC_OPTIMIZE_FOR_SIZE to select
   // -Os, otherwise -O2 is the default.
-  o << "EXTRA_CFLAGS += -freorder-blocks" << endl; // improve on -Os
+  o << extra_cflags << " += -freorder-blocks" << endl; // improve on -Os
 
   // Generate eh_frame for self-backtracing
   // FIXME Work around the issue with riscv kernel modules not being
@@ -605,49 +633,49 @@ compile_pass (systemtap_session& s)
   // eh_frame bad-reloc warnings from kbuild.
   //
   if (s.architecture != "riscv" && s.kernel_config["CONFIG_CC_HAS_IBT"] != "y")
-    o << "EXTRA_CFLAGS += -fasynchronous-unwind-tables" << endl;
+    o << extra_cflags << " += -fasynchronous-unwind-tables" << endl;
 
   // We used to allow the user to override default optimization when so
   // requested by adding a -O[0123s] so they could determine the
   // time/space/speed tradeoffs themselves, but we cannot guantantee that
   // the (un)optimized code actually compiles and/or generates functional
   // code, so we had to remove it.
-  // o << "EXTRA_CFLAGS += " << s.gcc_flags << endl; // Add -O[0123s]
+  // o << extra_cflags << " += " << s.gcc_flags << endl; // Add -O[0123s]
 
   // o << "CFLAGS += -fno-unit-at-a-time" << endl;
 
   // gcc 5.0.0-0.13.fc23 ipa-icf seems to consume gigacpu on stap-generated code
-  o << "EXTRA_CFLAGS += $(call cc-option,-fno-ipa-icf)" << endl;
+  o << extra_cflags << " += $(call cc-option,-fno-ipa-icf)" << endl;
 
   // Assumes linux 2.6 kbuild
-  o << "EXTRA_CFLAGS += -Wno-unused " << "-Werror" << endl;
+  o << extra_cflags << " += -Wno-unused " << "-Werror" << endl;
   #if CHECK_POINTER_ARITH_PR5947
-  o << "EXTRA_CFLAGS += -Wpointer-arith" << endl;
+  o << extra_cflags << " += -Wpointer-arith" << endl;
   #endif
 
   // Accept extra diagnostic-suppression pragmas etc.
-  o << "EXTRA_CFLAGS += -Wno-pragmas" << endl;
+  o << extra_cflags << " += -Wno-pragmas" << endl;
 
   // Suppress gcc12 diagnostic bug in kernel-devel for 5.16ish
-  o << "EXTRA_CFLAGS += $(call cc-option,-Wno-infinite-recursion)" << endl;
+  o << extra_cflags << " += $(call cc-option,-Wno-infinite-recursion)" << endl;
 
   // Suppress gcc12 diagnostic about STAP_KPROBE_PROBE_STR_* null checks
-  o << "EXTRA_CFLAGS += -Wno-address" << endl;
+  o << extra_cflags << " += -Wno-address" << endl;
   
   // PR25845: Recent gcc (seen on 9.3.1) warns fairly common 32-bit pointer-conversions:
-  o << "EXTRA_CFLAGS += $(call cc-option,-Wno-pointer-to-int-cast)" << endl;
-  o << "EXTRA_CFLAGS += $(call cc-option,-Wno-int-to-pointer-cast)" << endl;
+  o << extra_cflags << " += $(call cc-option,-Wno-pointer-to-int-cast)" << endl;
+  o << extra_cflags << " += $(call cc-option,-Wno-int-to-pointer-cast)" << endl;
   // TODO: Some tests also suffer from -Werror=overflow. That seems like a warning requiring a tiny bit more care.
 
   // If we've got a reasonable runtime path from the user, we'll just
   // do '-IDIR'. If there are any sneaky/odd characters in it, we'll
   // have to quote it, like '-I"DIR"'.
   if (s.runtime_path.find_first_not_of(PATH_ALLOWED_CHARS, 0) == string::npos)
-    o << "EXTRA_CFLAGS += -I" << s.runtime_path << endl;
+    o << extra_cflags << " += -I" << s.runtime_path << endl;
   else
     {
       s.print_warning("quoting runtime path in the module Makefile.");
-      o << "EXTRA_CFLAGS += -I\"" << s.runtime_path << "\"" << endl;
+      o << extra_cflags << " += -I\"" << s.runtime_path << "\"" << endl;
     }
 
   // XXX: this may help ppc toc overflow
@@ -691,18 +719,20 @@ compile_pass (systemtap_session& s)
     }
   o << " stap_symbols.o" << endl;
 
-  o << s.tmpdir << "/stap_symbols.o: $(STAPCONF_HEADER)" << endl;
+  o << "$(obj)/stap_symbols.o: $(STAPCONF_HEADER)" << endl;
 
   // add all stapconf dependencies
   string translated = s.translated_source;
+  translated = translated.substr(translated.rfind('/')+1); // basename
   translated[translated.size()-1] = 'o';
-  o << translated << ": $(STAPCONF_HEADER)" << endl;
+  o << "$(obj)/" << translated << ": $(STAPCONF_HEADER)" << endl;
   translated[translated.size()-1] = 'i';
-  o << translated << ": $(STAPCONF_HEADER)" << endl;
+  o << "$(obj)/" << translated << ": $(STAPCONF_HEADER)" << endl;
   for (unsigned i=0; i<s.auxiliary_outputs.size(); i++) {
     translated = s.auxiliary_outputs[i]->filename;
+    translated = translated.substr(translated.rfind('/')+1); // basename
     translated[translated.size()-1] = 'o';
-    o << translated << ": $(STAPCONF_HEADER)" << endl;
+    o << "$(obj)/" << translated << ": $(STAPCONF_HEADER)" << endl;
   }
 
   o.close ();
@@ -722,7 +752,7 @@ compile_pass (systemtap_session& s)
 
   // Run make
   vector<string> make_cmd = make_make_cmd(s, s.tmpdir);
-  if (s.keep_tmpdir)
+  if (false && s.keep_tmpdir) // PR32458: kbuild 6.13+ can't abide multiple make targets
     {
       string E_source = s.translated_source.substr(s.translated_source.find_last_of("/")+1);
       E_source.at(E_source.length() - 1) = 'i'; // overwrite the last character
@@ -1059,11 +1089,17 @@ make_tracequeries(systemtap_session& s, const map<string,string>& contents)
       return objs;
     }
 
+  // Support deprecation of $(EXTRA_CFLAGS); replacement flag available since 3.18ish.
+  // See linux kernel commits f77bf01425b119 and e966ad0edd005 
+  string extra_cflags = "EXTRA_CFLAGS";
+  if (strverscmp (s.kernel_base_release.c_str(), "6.15") >= 0)
+    extra_cflags = "ccflags-y";
+  
   // create a simple Makefile
   string makefile(dir + "/Makefile");
   ofstream omf(makefile.c_str());
   // force debuginfo generation, and relax implicit functions
-  omf << "EXTRA_CFLAGS := -g -Wno-implicit-function-declaration " << "-Werror" << endl;
+  omf << extra_cflags << " := -g -Wno-implicit-function-declaration " << "-Werror" << endl;
   // RHBZ 655231: later rhel6 kernels' module-signing kbuild logic breaks out-of-tree modules
   omf << "CONFIG_MODULE_SIG := n" << endl;
   // PR23488: need to override this kconfig, else we get no useful struct decls
@@ -1071,13 +1107,13 @@ make_tracequeries(systemtap_session& s, const map<string,string>& contents)
   // objtool is slow and uses a lot of memory, skip it since these modules aren't loaded
   omf << "CONFIG_STACK_VALIDATION := " << endl;
   // PR18389: disable GCC's Identical Code Folding, since the stubs may look identical
-  omf << "EXTRA_CFLAGS += $(call cc-option,-fno-ipa-icf)" << endl;
+  omf << extra_cflags << " += $(call cc-option,-fno-ipa-icf)" << endl;
 
-  omf << "EXTRA_CFLAGS += -I" + s.kernel_build_tree << endl;
+  omf << extra_cflags << " += -I" + s.kernel_build_tree << endl;
   if (s.kernel_source_tree != "")
-    omf << "EXTRA_CFLAGS += -I" + s.kernel_source_tree << endl;
+    omf << extra_cflags << " += -I" + s.kernel_source_tree << endl;
   for (unsigned i = 0; i < s.kernel_extra_cflags.size(); i++)
-    omf << "EXTRA_CFLAGS += " + s.kernel_extra_cflags[i] << endl;
+    omf << extra_cflags << " += " + s.kernel_extra_cflags[i] << endl;
 
   omf << "obj-m := " << endl;
   // write out each header-specific source file into a separate file
@@ -1139,10 +1175,16 @@ make_typequery_kmod(systemtap_session& s, const vector<string>& headers, string&
 
   name = dir + "/" + basename + ".ko";
 
+  // Support deprecation of $(EXTRA_CFLAGS); replacement flag available since 3.18ish.
+  // See linux kernel commits f77bf01425b119 and e966ad0edd005 
+  string extra_cflags = "EXTRA_CFLAGS";
+  if (strverscmp (s.kernel_base_release.c_str(), "6.15") >= 0)
+    extra_cflags = "ccflags-y";
+
   // create a simple Makefile
   string makefile(dir + "/Makefile");
   ofstream omf(makefile.c_str());
-  omf << "EXTRA_CFLAGS := -g -fno-eliminate-unused-debug-types" << endl;
+  omf << extra_cflags << " := -g -fno-eliminate-unused-debug-types" << endl;
 
   // RHBZ 655231: later rhel6 kernels' module-signing kbuild logic breaks out-of-tree modules
   omf << "CONFIG_MODULE_SIG := n" << endl;
@@ -1160,9 +1202,19 @@ make_typequery_kmod(systemtap_session& s, const vector<string>& headers, string&
   // full kernel build tree, it's possible to get at types that aren't in the
   // normal include path, e.g.:
   //    @cast(foo, "bsd_acct_struct", "kernel<kernel/acct.c>")->...
-  omf << "CFLAGS_" << basename << ".o :=";
+  omf << "CFLAGS_" << basename << ".o := -w "; // suppress warnings
+  bool no_vmlinux_h = true;
   for (size_t i = 0; i < headers.size(); ++i)
-    omf << " -include " << lex_cast_qstring(headers[i]); // XXX right quoting?
+    {
+      const string& h = headers[i];
+      if (h == string("vmlinux.h")) // PR33428: vmlinux.h special case
+        {
+          omf << " -include " << lex_cast_qstring(s.kernel_build_tree) << "/" << lex_cast_qstring("vmlinux.h");
+          no_vmlinux_h = false;
+        }
+      else
+        omf << " -include " << lex_cast_qstring(h); // XXX right quoting?
+    }
   omf << endl;
 
   omf << "obj-m := " + basename + ".o" << endl;
@@ -1172,9 +1224,17 @@ make_typequery_kmod(systemtap_session& s, const vector<string>& headers, string&
   string source(dir + "/" + basename + ".c");
   ofstream osrc(source.c_str());
 
-  // this is mandated by linux kbuild as of 5.11+
-  osrc << "#include <linux/module.h>" << endl;
-  osrc << "MODULE_LICENSE(\"GPL\");" << endl;
+  if (no_vmlinux_h) {
+    // this is mandated by linux kbuild as of 5.11+
+    osrc << "#include <linux/module.h>" << endl;
+    osrc << "MODULE_LICENSE(\"GPL\");" << endl;
+    osrc << "MODULE_DESCRIPTION(\"" << basename << "\");" << endl;
+  } else {
+    // PR33428: do the same as the above, but without using linux/module.h macro infrastructure, because
+    // vmlinux.h conflicts with kernel headers.
+    osrc << "static const char modinfo[] __attribute__((__used__)) __attribute__((__section__(\".modinfo\"))) = \"license=GPL\\0description=typequery\";" << endl;
+  }
+  
   
   osrc.close();
 

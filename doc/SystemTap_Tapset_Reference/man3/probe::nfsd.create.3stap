@@ -2,12 +2,12 @@
 .\"     Title: probe::nfsd.create
 .\"    Author: 
 .\" Generator: DocBook XSL Stylesheets vsnapshot <http://docbook.sf.net/>
-.\"      Date: April 2024
+.\"      Date: October 2025
 .\"    Manual: Network File Storage Tapsets
 .\"    Source: SystemTap Tapset Reference
 .\"  Language: English
 .\"
-.TH "PROBE::NFSD\&.CREATE" "3stap" "April 2024" "SystemTap Tapset Reference" "Network File Storage Tapsets"
+.TH "PROBE::NFSD\&.CREATE" "3stap" "October 2025" "SystemTap Tapset Reference" "Network File Storage Tapsets"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -41,21 +41,6 @@ nfsd\&.create
 file name
 .RE
 .PP
-\fIclient_ip\fR
-.RS 4
-the ip address of client
-.RE
-.PP
-\fIiap_mode\fR
-.RS 4
-file access mode
-.RE
-.PP
-\fIfilelen\fR
-.RS 4
-the length of file name
-.RE
-.PP
 \fIiap_valid\fR
 .RS 4
 Attribute flags
@@ -64,6 +49,21 @@ Attribute flags
 \fItype\fR
 .RS 4
 file type(regular,dir,device,fifo \&.\&.\&.)
+.RE
+.PP
+\fIfilelen\fR
+.RS 4
+the length of file name
+.RE
+.PP
+\fIiap_mode\fR
+.RS 4
+file access mode
+.RE
+.PP
+\fIclient_ip\fR
+.RS 4
+the ip address of client
 .RE
 .PP
 \fIfh\fR

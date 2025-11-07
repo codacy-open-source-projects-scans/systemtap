@@ -2,12 +2,12 @@
 .\"     Title: probe::tty.receive
 .\"    Author: 
 .\" Generator: DocBook XSL Stylesheets vsnapshot <http://docbook.sf.net/>
-.\"      Date: April 2024
+.\"      Date: October 2025
 .\"    Manual: TTY Tapset
 .\"    Source: SystemTap Tapset Reference
 .\"  Language: English
 .\"
-.TH "PROBE::TTY\&.RECEIVE" "3stap" "April 2024" "SystemTap Tapset Reference" "TTY Tapset"
+.TH "PROBE::TTY\&.RECEIVE" "3stap" "October 2025" "SystemTap Tapset Reference" "TTY Tapset"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -46,9 +46,9 @@ the tty id
 The amount of characters received
 .RE
 .PP
-\fIfp\fR
+\fIname\fR
 .RS 4
-The flag buffer
+the name of the module file
 .RE
 .PP
 \fIdriver_name\fR
@@ -56,19 +56,19 @@ The flag buffer
 the driver name
 .RE
 .PP
-\fIname\fR
+\fIindex\fR
 .RS 4
-the name of the module file
+The tty Index
+.RE
+.PP
+\fIfp\fR
+.RS 4
+The flag buffer
 .RE
 .PP
 \fIcp\fR
 .RS 4
 the buffer that was received
-.RE
-.PP
-\fIindex\fR
-.RS 4
-The tty Index
 .RE
 .SH SEE ALSO\n 
 .IR tapset::tty (3stap)

@@ -1,7 +1,7 @@
 dnl configure.ac --- autoconf input file for systemtap
 dnl Process this file with autoconf to produce a configure script.
 
-AC_INIT([systemtap],[5.2],[systemtap@sourceware.org],[systemtap])
+AC_INIT([systemtap],[5.4],[systemtap@sourceware.org],[systemtap])
 dnl                  ^^^ see also NEWS, systemtap.spec, testsuite/configure.ac
 dnl                      doc/SystemTap_Beginners_Guide/en-US/Book_Info.xml
 
@@ -621,8 +621,13 @@ AC_MSG_NOTICE([stapbpf will link $stapbpf_LIBS])
 # This is no longer necessary.
 
 AC_LANG_PUSH(C++)
-# Use boost::string_ref if available
-AC_CHECK_HEADERS([boost/utility/string_ref.hpp])
+
+# PR32788 concurrency goodies
+AC_CHECK_HEADERS([boost/asio/thread_pool.hpp])
+AC_CHECK_HEADERS([boost/asio/post.hpp])
+# Use boost::string_ref if available; moot with PR32788
+# AC_CHECK_HEADERS([boost/utility/string_ref.hpp])
+
 # add boost_system bits for stapdyn with dyninst 10+
 saved_LIBS="$LIBS"
 LIBS="-lboost_system $LIBS"
@@ -867,6 +872,20 @@ support_section_question=0
 if test $stap_cv_sectionq = yes; then
   support_section_question=1
 fi
+
+AC_CACHE_CHECK([for assembler .section "R" flags support], stap_cv_sectionr, [
+old_CFLAGS="$CFLAGS"
+CFLAGS="$CFLAGS -Wa,--fatal-warnings"
+AC_COMPILE_IFELSE([AC_LANG_SOURCE([asm(".section .text,\"aGR\",\"progbits\",foogroup,comdat\n"
+		       ".byte 2\n");])],
+		  stap_cv_sectionr=yes, stap_cv_sectionr=no)
+CFLAGS="$old_CFLAGS"])
+AC_SUBST(support_section_retain)
+support_section_retain=0
+if test $stap_cv_sectionr = yes; then
+  support_section_retain=1
+fi
+
 
 
 AC_ARG_WITH([bpf],

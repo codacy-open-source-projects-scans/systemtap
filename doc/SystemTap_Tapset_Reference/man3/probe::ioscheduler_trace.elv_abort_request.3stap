@@ -2,12 +2,12 @@
 .\"     Title: probe::ioscheduler_trace.elv_abort_request
 .\"    Author: 
 .\" Generator: DocBook XSL Stylesheets vsnapshot <http://docbook.sf.net/>
-.\"      Date: April 2024
+.\"      Date: October 2025
 .\"    Manual: IO Scheduler and block IO Tapset
 .\"    Source: SystemTap Tapset Reference
 .\"  Language: English
 .\"
-.TH "PROBE::IOSCHEDULER_T" "3stap" "April 2024" "SystemTap Tapset Reference" "IO Scheduler and block IO Taps"
+.TH "PROBE::IOSCHEDULER_T" "3stap" "October 2025" "SystemTap Tapset Reference" "IO Scheduler and block IO Taps"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -41,19 +41,9 @@ ioscheduler_trace\&.elv_abort_request
 Request flags\&.
 .RE
 .PP
-\fIname\fR
-.RS 4
-Name of the probe point
-.RE
-.PP
 \fIdisk_minor\fR
 .RS 4
 Disk minor number of request\&.
-.RE
-.PP
-\fIrq\fR
-.RS 4
-Address of request\&.
 .RE
 .PP
 \fIelevator_name\fR
@@ -64,6 +54,16 @@ The type of I/O elevator currently enabled\&.
 \fIdisk_major\fR
 .RS 4
 Disk major no of request\&.
+.RE
+.PP
+\fIrq\fR
+.RS 4
+Address of request\&.
+.RE
+.PP
+\fIname\fR
+.RS 4
+Name of the probe point
 .RE
 .SH SEE ALSO\n 
 .IR tapset::ioscheduler (3stap)

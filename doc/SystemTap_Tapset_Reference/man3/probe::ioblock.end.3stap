@@ -2,12 +2,12 @@
 .\"     Title: probe::ioblock.end
 .\"    Author: 
 .\" Generator: DocBook XSL Stylesheets vsnapshot <http://docbook.sf.net/>
-.\"      Date: April 2024
+.\"      Date: October 2025
 .\"    Manual: IO Scheduler and block IO Tapset
 .\"    Source: SystemTap Tapset Reference
 .\"  Language: English
 .\"
-.TH "PROBE::IOBLOCK\&.END" "3stap" "April 2024" "SystemTap Tapset Reference" "IO Scheduler and block IO Taps"
+.TH "PROBE::IOBLOCK\&.END" "3stap" "October 2025" "SystemTap Tapset Reference" "IO Scheduler and block IO Taps"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -36,44 +36,19 @@ ioblock\&.end
 .fi
 .SH "VALUES"
 .PP
-\fIdevname\fR
+\fIvcnt\fR
 .RS 4
-block device name
+bio vector count which represents number of array element (page, offset, length) which makes up this I/O request
 .RE
 .PP
-\fIino\fR
+\fIsize\fR
 .RS 4
-i\-node number of the mapped file
-.RE
-.PP
-\fIerror\fR
-.RS 4
-0 on success
-.RE
-.PP
-\fIrw\fR
-.RS 4
-binary trace for read/write request
-.RE
-.PP
-\fIopf\fR
-.RS 4
-operations and flags
+total size in bytes
 .RE
 .PP
 \fIhw_segments\fR
 .RS 4
 number of segments after physical and DMA remapping hardware coalescing is performed
-.RE
-.PP
-\fIphys_segments\fR
-.RS 4
-number of segments in this bio after physical address coalescing is performed\&.
-.RE
-.PP
-\fIidx\fR
-.RS 4
-offset into the bio vector array
 .RE
 .PP
 \fIbytes_done\fR
@@ -86,14 +61,24 @@ number of bytes transferred
 beginning sector for the entire bio
 .RE
 .PP
-\fIvcnt\fR
+\fIerror\fR
 .RS 4
-bio vector count which represents number of array element (page, offset, length) which makes up this I/O request
+0 on success
 .RE
 .PP
-\fIsize\fR
+\fIidx\fR
 .RS 4
-total size in bytes
+offset into the bio vector array
+.RE
+.PP
+\fIrw\fR
+.RS 4
+binary trace for read/write request
+.RE
+.PP
+\fIdevname\fR
+.RS 4
+block device name
 .RE
 .PP
 \fIname\fR
@@ -101,9 +86,24 @@ total size in bytes
 name of the probe point
 .RE
 .PP
+\fIphys_segments\fR
+.RS 4
+number of segments in this bio after physical address coalescing is performed\&.
+.RE
+.PP
+\fIopf\fR
+.RS 4
+operations and flags
+.RE
+.PP
 \fIflags\fR
 .RS 4
 see below BIO_UPTODATE 0 ok after I/O completion BIO_RW_BLOCK 1 RW_AHEAD set, and read/write would block BIO_EOF 2 out\-out\-bounds error BIO_SEG_VALID 3 nr_hw_seg valid BIO_CLONED 4 doesn\*(Aqt own data BIO_BOUNCED 5 bio is a bounce bio BIO_USER_MAPPED 6 contains user pages BIO_EOPNOTSUPP 7 not supported
+.RE
+.PP
+\fIino\fR
+.RS 4
+i\-node number of the mapped file
 .RE
 .SH "CONTEXT"
 .PP

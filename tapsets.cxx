@@ -16,7 +16,7 @@
 #include "tapset-dynprobe.h"
 #include "translate.h"
 #include "session.h"
-#include "util.h"
+#include "staputil.h"
 #include "buildrun.h"
 #include "dwarf_wrappers.h"
 #include "hash.h"
@@ -500,10 +500,10 @@ static const string TOK_LIBRARY("library");
 static const string TOK_PLT("plt");
 static const string TOK_METHOD("method");
 static const string TOK_CLASS("class");;
-static const string TOK_CALLEE("callee");;
-static const string TOK_CALLEES("callees");;
-static const string TOK_NEAREST("nearest");;
-
+static const string TOK_CALLEE("callee");
+static const string TOK_CALLEES("callees");
+static const string TOK_NEAREST("nearest");
+static const string TOK_KERNEL_VMLINUX_H("kernel<vmlinux.h>");
 
 
 struct dwarf_query; // forward decl
@@ -3118,9 +3118,22 @@ var_expanding_visitor::visit_defined_op (defined_op* e)
 
     target_symbol* tsym = dynamic_cast<target_symbol*> (e->operand);
     if (tsym && tsym->saved_conversion_error) // failing
-      resolved = false;
+      {
+        if (sess.verbose>3)
+          {
+            for (const semantic_error *c = tsym->saved_conversion_error;
+                 c != 0;
+                 c = c->get_chain()) {
+              clog << _("variable location problem [man error::dwarf]: ") << c->what() << endl;
+            }
+          }
+        resolved = false;
+      }
     else if (e->operand == old_operand) // unresolved but not marked failing
       {
+        if (sess.verbose>3)
+          clog << _("@defined unresolved due to un-rewritten operand ") << *e << endl;
+        
         // There are some visitors that won't touch certain target_symbols,
         // e.g. dwarf_var_expanding_visitor won't resolve @cast.  We should
         // leave it for now so some other visitor can have a chance.
@@ -3132,6 +3145,8 @@ var_expanding_visitor::visit_defined_op (defined_op* e)
       resolved = true;
   } catch (const semantic_error& e) {
     // some uncooperative value like @perf("NO_SUCH_VALUE")
+    if (sess.verbose > 3)
+      clog << sess.build_error_msg (e);
     resolved = false;
   }
   defined_ops.pop ();
@@ -4838,7 +4853,7 @@ dwarf_var_expanding_visitor::visit_target_symbol (target_symbol *e)
 void
 dwarf_var_expanding_visitor::visit_cast_op (cast_op *e)
 {
-  // Fill in our current module context if needed
+  // Fill in our current module context if needed, i.e., absent third field in @cast() 
   if (e->module.empty())
     {
       // Backward compatibility for @cast() ops, sans module string,
@@ -4847,7 +4862,16 @@ dwarf_var_expanding_visitor::visit_cast_op (cast_op *e)
       if (strverscmp(sess.compatible.c_str(), "4.3") < 0)
         e->module = "kernel";
       else
-        e->module = q.dw.module_name;
+        {
+          // absolute /user/space/path/name xor kernel xor kernel-module name
+          if (is_user_module (q.dw.module_name))
+            e->module = q.dw.module_name;
+          else if ((strverscmp(sess.compatible.c_str(), "5.4") >= 0) && // default on new enough systemtap
+                   (strverscmp(sess.kernel_base_release.c_str(), "6.7") >= 0)) // for new enough kernel to have a vmlinux.h
+            e->module = string(TOK_KERNEL_VMLINUX_H) + string(":") + q.dw.module_name; // PR33428: prefix
+          else
+            e->module = q.dw.module_name;            
+        }
     }
   
   var_expanding_visitor::visit_cast_op(e);
@@ -5138,10 +5162,27 @@ void dwarf_cast_expanding_visitor::visit_cast_op (cast_op* e)
 
   // split the module string by ':' for alternatives
   vector<string> modules;
+
+  // PR33428: prepend "kernel<vmlinux.h>" to the list if there is any
+  // "kernel" or "kernel<FILE>" component.
+  if ((strverscmp(sess.compatible.c_str(), "5.4") >= 0) && // default on new enough systemtap
+      (strverscmp(sess.kernel_base_release.c_str(), "6.7") >= 0) && // for new enough kernel to have a vmlinux.h
+      (e->module.find(TOK_KERNEL_VMLINUX_H) == string::npos)) // don't prepend again; might already be here from implicit "" expansion
+    {
+      if (e->module.starts_with("kernel")) // right at the front?
+        e->module = string(TOK_KERNEL_VMLINUX_H) + string(":") + e->module;
+      else {
+        string::size_type p = e->module.find(":kernel"); // in the middle?
+        if (p != string::npos)
+          e->module.insert(p, TOK_KERNEL_VMLINUX_H + string (":"));
+      }
+    }
+  
   tokenize(e->module, modules, ":");
-  bool userspace_p=false; // PR10601
+  
   for (unsigned i = 0; !result && i < modules.size(); ++i)
     {
+      bool userspace_p=false; // PR10601
       string& module = modules[i];
       filter_special_modules(module);
 
@@ -6204,11 +6245,10 @@ dwarf_derived_probe::emit_probe_local_init(systemtap_session& s, translator_outp
 	   pcii++)
         {
 	  // Find the associated perf.counter probe
-	  unsigned i = 0;
 
 	  for (auto it=s.perf_counters.begin() ;
 	       it != s.perf_counters.end();
-	       it++, i++)
+	       it++)
 	    {
 	      if ((*it).first == (*pcii))
 	        {
@@ -10892,8 +10932,12 @@ hwbkpt_derived_probe_group::emit_module_decls (systemtap_session& s)
   s.op->newline() << "static struct perf_event_attr ";
   s.op->newline() << "stap_hwbkpt_probe_array[" << hwbkpt_probes.size() << "];";
 
-  s.op->newline() << "static void *";
-  s.op->newline() << "stap_hwbkpt_ret_array[" << hwbkpt_probes.size() << "];";
+  // For address-space checking pedanticism, separate the u and k
+  // hwbpkt data.  Only one or the other slot will actually be used
+  // for any particular index.
+  s.op->newline() << "static struct perf_event * stap_hwbkpt_u_ret_array[" << hwbkpt_probes.size() << "];";
+  s.op->newline() << "static struct perf_event * __percpu * stap_hwbkpt_k_ret_array[" << hwbkpt_probes.size() << "];";
+  
   s.op->newline() << "static struct stap_hwbkpt_probe stap_hwbkpt_probes[] = {";
   s.op->indent(1);
 
@@ -10965,15 +11009,15 @@ hwbkpt_derived_probe_group::emit_module_init (systemtap_session& s)
 {
   s.op->newline() << "rc = stap_hwbkpt_init(&enter_hwbkpt_probe, stap_hwbkpt_probes, "
     << hwbkpt_probes.size() << ", stap_hwbkpt_probe_array, "
-    << "stap_hwbkpt_ret_array, &probe_point);";
+    << "stap_hwbkpt_u_ret_array, stap_hwbkpt_k_ret_array, &probe_point);";
 }
 
 void
 hwbkpt_derived_probe_group::emit_module_exit (systemtap_session& s)
 {
-  //Unregister hwbkpt probes.
+  // Unregister hwbkpt probes.
   s.op->newline() << "stap_hwbkpt_exit(stap_hwbkpt_probes, "
-    << hwbkpt_probes.size() << ", stap_hwbkpt_ret_array);";
+    << hwbkpt_probes.size() << ", stap_hwbkpt_u_ret_array, stap_hwbkpt_k_ret_array);";
 }
 
 
@@ -11736,6 +11780,89 @@ static vector<string> tracepoint_extra_decls (systemtap_session& s,
 {
   vector<string> they_live;
 
+  // Kernel 6.12 (6.12.0-0.rc7.59.fc42) add needed forward decls
+  if (header.find("avc") != string::npos) // trace/events/avc.h
+    they_live.push_back ("struct selinux_audit_data;");
+  if (header.find("bcachefs") != string::npos) // fs/bcachefs/trace.h
+    {
+      they_live.push_back ("struct bch_fs;");
+      they_live.push_back ("struct bch_move_stats;");
+      they_live.push_back ("struct bpos;");
+      they_live.push_back ("struct btree_bkey_cached_common;");
+      they_live.push_back ("struct btree_insert_entry;");
+      they_live.push_back ("struct btree_path;");
+      they_live.push_back ("struct btree_trans;");
+      they_live.push_back ("struct get_locks_fail;");
+    }
+  if (header.find("compaction") != string::npos) // trace/events/compaction.h
+    they_live.push_back ("struct compact_control;");
+  if (header.find("f2fs") != string::npos) // trace/events/f2fs.h
+    they_live.push_back ("enum extent_type;");
+  if (header.find("fuse") != string::npos) // fs/fuse/fuse_trace.h
+    they_live.push_back ("struct fuse_req;");
+  if (header.find("handshake") != string::npos) // trace/events/handshake.h
+    they_live.push_back ("struct handshake_req;");
+  if (header.find("i2c") != string::npos) // trace/events/fsi_master_i2cr.h
+    they_live.push_back ("struct i2c_client;");
+  if (header.find("ib_mad") != string::npos) // trace/events/ib_mad.h
+    they_live.push_back ("struct opa_smp;");
+  if (header.find("ifs") != string::npos) // trace/events/intel_ifs.h
+    {
+      they_live.push_back ("union ifs_sbaf;");
+      they_live.push_back ("union ifs_sbaf_status;");
+    }
+  if ((header.find("iomap") != string::npos) || // fs/iomap/trace.h
+      (header.find("zonefs") != string::npos))  // fs/zonefs/trace.h
+    {
+      they_live.push_back ("struct iomap;");
+      they_live.push_back ("struct iomap_iter;");
+    }
+  if (header.find("kvm") != string::npos) // include/trace/events/kvm.h (ppc64le)
+    {
+      they_live.push_back ("struct kvm_dirty_ring;");
+      they_live.push_back ("struct kvm_vcpu;");
+    }
+  if (header.find("mce") != string::npos) // include/trace/events/mce.h (ppc64le)
+    they_live.push_back ("struct mce;");
+  if (header.find("mctp") != string::npos) // trace/events/mctp.h
+    they_live.push_back ("struct mctp_sk_key;");
+  if (header.find("mptcp") != string::npos) // trace/events/mptcp.h
+    {
+      they_live.push_back ("struct mptcp_ext;");
+      they_live.push_back ("struct mptcp_subflow_context;");
+    }
+  if (header.find("nbd") != string::npos) // trace/events/nbd.h
+    {
+      they_live.push_back ("struct nbd_request;");
+      they_live.push_back ("struct request;");
+    }
+  if (header.find("netfs") != string::npos) // trace/events/netfs.h
+    {
+      they_live.push_back ("struct netfs_io_request;");
+      they_live.push_back ("struct netfs_io_stream;");
+      they_live.push_back ("struct netfs_io_subrequest;");
+    }
+  if (header.find("pwc") != string::npos) // trace/events/pwc.h
+    they_live.push_back ("struct pwc_device;");
+  if (header.find("spi") != string::npos) // trace/events/spi.h
+    they_live.push_back ("struct spi_device;");
+  if (header.find("timer_migration") != string::npos) // trace/events/timer_migration.h
+    {
+      they_live.push_back ("struct tmigr_cpu;");
+      they_live.push_back ("struct tmigr_group;");
+      they_live.push_back ("union tmigr_state;");
+    }
+  if (header.find("ufs") != string::npos) // include/trace/events/ufs.h (aarch64, s390x)
+    {
+      they_live.push_back ("enum ufs_trace_str_t;");
+      they_live.push_back ("enum ufs_trace_tsf_t;");
+    }
+  if (header.find("virtio") != string::npos) // drivers/gpu/drm/virtio/virtgpu_trace.h
+    {
+      they_live.push_back ("struct virtio_gpu_ctrl_hdr;");
+      they_live.push_back ("struct virtqueue;");
+    }
+
   // Several headers end up including events/irq.h, events/kmem.h, and
   // events/module.h on RHEL6 (since they include headers that include
   // those headers). This causes stap to think the tracepoints from
@@ -11815,38 +11942,49 @@ static vector<string> tracepoint_extra_decls (systemtap_session& s,
       s.kernel_extra_cflags.push_back ("-I" + s.kernel_source_tree
 				       + "/fs/xfs/libxfs");
 
-    they_live.push_back ("struct xfs_mount;");
-    they_live.push_back ("struct xfs_inode;");
-    they_live.push_back ("struct xfs_buf;");
     they_live.push_back ("struct xfs_bmbt_irec;");
-    they_live.push_back ("struct xfs_trans;");
-    they_live.push_back ("struct xfs_name;");
+    they_live.push_back ("struct xfs_buf;");
     they_live.push_back ("struct xfs_icreate_log;");
+    they_live.push_back ("struct xfs_inode;");
+    they_live.push_back ("struct xfs_mount;");
+    they_live.push_back ("struct xfs_name;");
+    they_live.push_back ("struct xfs_trans;");
   }
 
   if (header.find("nfs") != string::npos
       && s.kernel_config["CONFIG_NFSD"] != string("")) {
-    they_live.push_back ("struct rpc_task;");
-    they_live.push_back ("struct nfs_open_context;");
-    they_live.push_back ("struct nfs_client;");
-    they_live.push_back ("struct nfs_fattr;");
-    they_live.push_back ("struct nfs_fh;");
-    they_live.push_back ("struct nfs_server;");
-    they_live.push_back ("struct nfs_pgio_header;");
-    they_live.push_back ("struct nfs_commit_data;");
-    they_live.push_back ("struct nfs_closeres;");
-    they_live.push_back ("struct nfs_closeargs;");
-    they_live.push_back ("struct nfs_unlinkdata;");
-    they_live.push_back ("struct nfs_writeverf;");
+    they_live.push_back ("struct nfs42_clone_args;");
+    they_live.push_back ("struct nfs42_copy_args;");
+    they_live.push_back ("struct nfs42_copy_notify_args;");
+    they_live.push_back ("struct nfs42_copy_notify_res;");
+    they_live.push_back ("struct nfs42_copy_res;");
+    they_live.push_back ("struct nfs42_falloc_args;");
+    they_live.push_back ("struct nfs42_offload_status_args;");
+    they_live.push_back ("struct nfs42_seek_args;");
+    they_live.push_back ("struct nfs42_seek_res;");
+    they_live.push_back ("struct nfs4_delegreturnargs;");
+    they_live.push_back ("struct nfs4_delegreturnres;");
     they_live.push_back ("struct nfs4_sequence_args;");
     they_live.push_back ("struct nfs4_sequence_res;");
     they_live.push_back ("struct nfs4_session;");
     they_live.push_back ("struct nfs4_state;");
-    they_live.push_back ("struct nfs4_delegreturnres;");
-    they_live.push_back ("struct nfs4_delegreturnargs;");
+    they_live.push_back ("struct nfs_client;");
+    they_live.push_back ("struct nfs_closeargs;");
+    they_live.push_back ("struct nfs_closeres;");
+    they_live.push_back ("struct nfs_commit_data;");
+    they_live.push_back ("struct nfs_direct_req;");
+    they_live.push_back ("struct nfs_fattr;");
+    they_live.push_back ("struct nfs_fh;");
+    they_live.push_back ("struct nfs_open_context;");
+    they_live.push_back ("struct nfs_page;");
+    they_live.push_back ("struct nfs_pgio_header;");
+    they_live.push_back ("struct nfs_server;");
+    they_live.push_back ("struct nfs_unlinkdata;");
+    they_live.push_back ("struct nfs_writeverf;");
     they_live.push_back ("struct pnfs_layout_hdr;");
     they_live.push_back ("struct pnfs_layout_range;");
     they_live.push_back ("struct pnfs_layout_segment;");
+    they_live.push_back ("struct rpc_task;");
 
     // We need a definition of a 'stateid_t', which is a typedef of an
     // anonymous struct. So, we'll have to include the right kernel
@@ -11863,8 +12001,25 @@ static vector<string> tracepoint_extra_decls (systemtap_session& s,
 
   // RHEL6.3
   if (header.find("rpc") != string::npos && s.kernel_config["CONFIG_NFSD"] != string("")) {
+    they_live.push_back ("struct gss_cred;");
+    they_live.push_back ("struct rpc_auth;");
     they_live.push_back ("struct rpc_clnt;");
+    they_live.push_back ("struct rpc_gss_wire_cred;");
+    they_live.push_back ("struct rpc_rqst;");
+    they_live.push_back ("struct rpc_task;");
     they_live.push_back ("struct rpc_wait_queue;");
+    they_live.push_back ("struct rpcrdma_ep;");
+    they_live.push_back ("struct rpcrdma_mr;");
+    they_live.push_back ("struct rpcrdma_notification;");
+    they_live.push_back ("struct rpcrdma_rep;");
+    they_live.push_back ("struct rpcrdma_req;");
+    they_live.push_back ("struct rpcrdma_xprt;");
+    they_live.push_back ("struct svc_rdma_chunk;");
+    they_live.push_back ("struct svc_rdma_recv_ctxt;");
+    they_live.push_back ("struct svc_rdma_segment;");
+    they_live.push_back ("struct svc_rdma_send_ctxt;");
+    they_live.push_back ("struct svc_rqst;");
+    they_live.push_back ("struct svcxprt_rdma;");
   }
 
   if (header.find("timer") != string::npos)
@@ -11887,14 +12042,24 @@ static vector<string> tracepoint_extra_decls (systemtap_session& s,
   // linux 3.0
   they_live.push_back ("struct cpu_workqueue_struct;");
 
-  if (header.find("clk") != string::npos)
+  if (header.find("clk") != string::npos) {
       they_live.push_back ("struct clk_duty;");
+      they_live.push_back ("struct clk_rate_request;");
+  }
   
-  if (header.find("fsi") != string::npos)
+  if (header.find("fsi") != string::npos) {
+      they_live.push_back ("struct fsi_device;");
       they_live.push_back ("struct fsi_master_acf;");
+      they_live.push_back ("struct fsi_msg;");
+      they_live.push_back ("struct fsi_slave;");
+  }
   
   if (header.find("ib_") != string::npos) {
+      they_live.push_back ("struct ib_mad_agent_private;");
       they_live.push_back ("struct ib_mad_hdr;");
+      they_live.push_back ("struct ib_mad_qp_info;");
+      they_live.push_back ("struct ib_mad_send_wr_private;");
+      they_live.push_back ("struct ib_smp;");
       they_live.push_back ("struct ib_user_mad_hdr;");
       they_live.push_back ("struct ib_umad_file;");
       if (header_exists(s, "/include/rdma/id_mad.h"))
@@ -11931,15 +12096,21 @@ static vector<string> tracepoint_extra_decls (systemtap_session& s,
     {
       they_live.push_back ("struct p9_client;");
       they_live.push_back ("struct p9_fcall;");
+      they_live.push_back ("struct p9_fid;");
+    }
+
+  if (header.find("cachefiles") != string::npos)
+    {
+      they_live.push_back ("enum cachefiles_content;");
     }
 
   if (header.find("bcache") != string::npos)
     {
+      they_live.push_back ("struct bcache_device;");
       they_live.push_back ("struct bkey;");
       they_live.push_back ("struct btree;");
-      they_live.push_back ("struct cache_set;");
       they_live.push_back ("struct cache;");
-      they_live.push_back ("struct bcache_device;");
+      they_live.push_back ("struct cache_set;");
     }
 
   if (header.find("f2fs") != string::npos)
@@ -11989,7 +12160,10 @@ static vector<string> tracepoint_extra_decls (systemtap_session& s,
     they_live.push_back ("struct ath5k_hw;");
 
   if (header.find("nilfs2") != string::npos)
-    they_live.push_back ("struct nilfs_transaction_info;");
+    {
+      they_live.push_back ("enum req_op;");
+      they_live.push_back ("struct nilfs_transaction_info;");
+    }
 
   if (header.find("spi") != string::npos)
     {
@@ -12148,6 +12322,10 @@ static vector<string> tracepoint_extra_decls (systemtap_session& s,
   if (header.find("cachefiles") != string::npos ||
       header.find("fscache") != string::npos)
     {
+      they_live.push_back ("struct cachefiles_msg;");
+      they_live.push_back ("struct cachefiles_open;");
+      they_live.push_back ("struct cachefiles_read;");
+      they_live.push_back ("struct cachefiles_volume;");
       they_live.push_back ("#include <linux/fscache.h>");
       they_live.push_back ("#include <linux/fscache-cache.h>");
       they_live.push_back ("struct cachefiles_object;"); // fs/cachefiles/internal.h
@@ -12185,6 +12363,7 @@ tracepoint_derived_probe_group::emit_module_decls (systemtap_session& s)
   s.op->newline() << "/* ---- tracepoint probes ---- */";
   s.op->newline() << "#include <linux/stp_tracepoint.h>" << endl;
   s.op->newline();
+
 
 
   // We create a MODULE_aux_N.c file for each tracepoint header, to allow them
@@ -12806,6 +12985,11 @@ tracepoint_builder::get_tracequery_modules(systemtap_session& s,
       osrc << "#ifndef PARAMS" << endl;
       osrc << "#define PARAMS(args...) args" << endl;
       osrc << "#endif" << endl;
+
+      // 6.13 handle DECLARE_TRACE_SYSCALL for sys_enter and sys_exit also
+      osrc << "#undef DECLARE_TRACE_SYSCALL" << endl;
+      osrc << "#define DECLARE_TRACE_SYSCALL(name, proto, args) \\" << endl;
+      osrc << "  DECLARE_TRACE(name, PARAMS(proto), PARAMS(args))" << endl;
 
       // 2.6.35 added the NOARGS variant, but it's the same for us
       osrc << "#undef DECLARE_TRACE_NOARGS" << endl;

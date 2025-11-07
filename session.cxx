@@ -19,7 +19,7 @@
 #include "task_finder.h"
 #include "csclient.h"
 #include "rpm_finder.h"
-#include "util.h"
+#include "staputil.h"
 #include "cmdline.h"
 #include "git_version.h"
 #include "version.h"
@@ -507,14 +507,14 @@ systemtap_session::version_string ()
 pair <string,string>
 systemtap_session::kernel_version_range()
 {
-  return make_pair<string,string>("3.10", "6.11-rc3");    // PRERELEASE
+  return make_pair<string,string>("3.10", "6.18-rc");    // PRERELEASE
 }
 
 void
 systemtap_session::version ()
 {
   cout << _F("Systemtap translator/driver (version %s)\n"
-             "Copyright (C) 2005-2024 Red Hat, Inc. and others\n"   // PRERELEASE
+             "Copyright (C) 2005-2025 Red Hat, Inc. and others\n"   // PRERELEASE
              "This is free software; see the source for copying conditions.\n",
              version_string().c_str());
   auto vr = kernel_version_range();
@@ -2072,7 +2072,7 @@ systemtap_session::check_options (int argc, char * const argv [])
 
   // If the kernel is using signed modules, we need to enforce server
   // use.
-  if (!client_options && modules_must_be_signed())
+  if (!client_options && (runtime_mode == kernel_runtime) && modules_must_be_signed())
     {
       if (verbose > 1)
         clog << _("This host requires module signing.") << endl;

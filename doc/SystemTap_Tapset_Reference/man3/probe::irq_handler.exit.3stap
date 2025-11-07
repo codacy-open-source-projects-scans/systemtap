@@ -2,12 +2,12 @@
 .\"     Title: probe::irq_handler.exit
 .\"    Author: 
 .\" Generator: DocBook XSL Stylesheets vsnapshot <http://docbook.sf.net/>
-.\"      Date: April 2024
+.\"      Date: October 2025
 .\"    Manual: Interrupt Request (IRQ) Tapset
 .\"    Source: SystemTap Tapset Reference
 .\"  Language: English
 .\"
-.TH "PROBE::IRQ_HANDLER\&" "3stap" "April 2024" "SystemTap Tapset Reference" "Interrupt Request (IRQ) Tapset"
+.TH "PROBE::IRQ_HANDLER\&" "3stap" "October 2025" "SystemTap Tapset Reference" "Interrupt Request (IRQ) Tapset"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -36,34 +36,14 @@ irq_handler\&.exit
 .fi
 .SH "VALUES"
 .PP
-\fIdir\fR
+\fInext_irqaction\fR
 .RS 4
-pointer to the proc/irq/NN/name entry
-.RE
-.PP
-\fIirq\fR
-.RS 4
-interrupt number
-.RE
-.PP
-\fIaction\fR
-.RS 4
-struct irqaction*
+pointer to next irqaction for shared interrupts
 .RE
 .PP
 \fIflags_str\fR
 .RS 4
 symbolic string representation of IRQ flags
-.RE
-.PP
-\fIthread_flags\fR
-.RS 4
-Flags related to thread
-.RE
-.PP
-\fIthread_fn\fR
-.RS 4
-interrupt handler function for threaded interrupts
 .RE
 .PP
 \fIflags\fR
@@ -76,14 +56,14 @@ flags for IRQ handler
 name of device
 .RE
 .PP
-\fInext_irqaction\fR
+\fIirq\fR
 .RS 4
-pointer to next irqaction for shared interrupts
+interrupt number
 .RE
 .PP
-\fIdev_id\fR
+\fIaction\fR
 .RS 4
-Cookie to identify device
+struct irqaction*
 .RE
 .PP
 \fIthread\fR
@@ -94,6 +74,26 @@ thread pointer for threaded interrupts
 \fIret\fR
 .RS 4
 return value of the handler
+.RE
+.PP
+\fIthread_flags\fR
+.RS 4
+Flags related to thread
+.RE
+.PP
+\fIthread_fn\fR
+.RS 4
+interrupt handler function for threaded interrupts
+.RE
+.PP
+\fIdev_id\fR
+.RS 4
+Cookie to identify device
+.RE
+.PP
+\fIdir\fR
+.RS 4
+pointer to the proc/irq/NN/name entry
 .RE
 .PP
 \fIhandler\fR

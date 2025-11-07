@@ -13,7 +13,7 @@
 #include "parse.h"
 #include "tapsets.h"
 #include "session.h"
-#include "util.h"
+#include "staputil.h"
 #include "task_finder.h"
 #include "stapregex.h"
 #include "stringtable.h"
@@ -1894,7 +1894,7 @@ semantic_pass_symbols (systemtap_session& s)
       assert_no_interrupts();
       stapfile* dome = s.files[i];
 
-      // Pass 1: add globals and functions to systemtap-session primart list,
+      // Pass 1: add globals and functions to systemtap-session primary list,
       //         so the find_* functions find them
       //
       // NB: tapset global/function definitions may duplicate or conflict
@@ -2602,7 +2602,7 @@ semantic_pass (systemtap_session& s)
       if (rc == 0) rc = semantic_pass_symbols (s);
       if (rc == 0) monitor_mode_write (s);
       if (rc == 0) rc = semantic_pass_conditions (s);
-      if (rc == 0) rc = semantic_pass_optimize1 (s);
+      if (rc == 0) rc = semantic_pass_optimize1 (s); // includes const_fold and last ditch @defined() processing
       if (rc == 0) rc = semantic_pass_types (s);
       if (rc == 0) rc = gen_dfa_table(s);
       if (rc == 0) add_global_var_display (s);
@@ -2656,7 +2656,7 @@ symresolution_info::symresolution_info (systemtap_session& s, bool omniscient_un
   session (s), unmangled_p(omniscient_unmangled), current_function (0), current_probe (0)
 {
   #pragma GCC diagnostic push
-  #if __GNUC__ >= 14
+  #if __GNUC__ >= 13
   // c10s early snapshot GCC complains about this construct, which is
   // made safe via our dtor usage
   #pragma GCC diagnostic ignored "-Wdangling-pointer"
@@ -2796,6 +2796,8 @@ symresolution_info::visit_symbol (symbol* e)
   vardecl* d = find_var (e->name, 0, e->tok);
   if (d)
     {
+      if (session.verbose > 4)
+        clog << "resolved variable " << *e->tok << " to " << *d->tok << endl;
       e->referent = d;
       e->name = d->name;
     }
@@ -2814,6 +2816,8 @@ symresolution_info::visit_symbol (symbol* e)
         // must be probe-condition expression
         throw SEMANTIC_ERROR (_("probe condition must not reference undeclared global"), e->tok);
       e->referent = v;
+      if (session.verbose > 4)
+        clog << "resolved variable " << *e->tok << " to new local" << endl;
     }
 }
 
@@ -5112,6 +5116,7 @@ const_folder::visit_defined_op (defined_op* e)
       // Don't be greedy... we'll only collapse one at a time so type
       // resolution can have another go at it.
       relaxed_p = false;
+      session.print_warning (_F("Collapsing unresolved @define to %ld [stapprobes]", value), e->tok);
       literal_number* n = new literal_number (value);
       n->tok = e->tok;
       n->visit (this);
@@ -5158,7 +5163,7 @@ const_folder::visit_target_symbol (target_symbol* e)
     }
 }
 
-static int initial_typeres_pass(systemtap_session& s);
+static int initial_typeres_pass(systemtap_session& s, bool& relaxed_p);
 static int semantic_pass_const_fold (systemtap_session& s, bool& relaxed_p)
 {
   // attempt an initial type resolution pass to see if there are any type
@@ -5166,7 +5171,7 @@ static int semantic_pass_const_fold (systemtap_session& s, bool& relaxed_p)
   // with a const.
 
   // return if the initial type resolution pass reported errors (type mismatches)
-  int rc = initial_typeres_pass(s);
+  int rc = initial_typeres_pass(s, relaxed_p);
   if (rc)
     {
       relaxed_p = true;
@@ -5989,6 +5994,25 @@ struct autocast_expanding_visitor: public var_expanding_visitor
         }
     }
 
+  void visit_symbol (symbol* e) // propagate referent exp_type
+  {
+    // PR32964: mimic typeresolution_info::resolve_details, for case
+    // where the symbol (autocast_op operand) is within a @defined().
+
+    if (e->referent && e->referent->type_details && !e->type_details)
+      {
+        const exp_type_ptr &src = e->referent->type_details;
+        exp_type_ptr &dest = e->type_details;
+        dest = src;
+        ti.num_newly_resolved++;
+        relaxed_p = false;
+        if (sess.verbose > 4)
+          clog << "resolved early type details " << *dest << " to " << *e->tok << endl;
+      }
+    var_expanding_visitor::visit_symbol (e);    
+  }
+
+
   void visit_autocast_op (autocast_op* e)
     {
       const bool lvalue = is_active_lvalue (e);
@@ -5999,7 +6023,7 @@ struct autocast_expanding_visitor: public var_expanding_visitor
           if (fc)
             {
               ti.num_newly_resolved++;
-
+              relaxed_p = false;
               resolve_functioncall (fc);
 	      // NB: at this stage, the functioncall object has one
 	      // argument too few if we're in lvalue context.  It will
@@ -6037,10 +6061,10 @@ struct initial_typeresolution_info : public typeresolution_info
   void visit_cast_op (cast_op*) {}
 };
 
-static int initial_typeres_pass(systemtap_session& s)
+static int initial_typeres_pass(systemtap_session& s, bool& relaxed_p)
 {
   // minimal type resolution based off of semantic_pass_types(), without
-  // checking for complete type resolutions or autocast expanding
+  // checking for complete type resolutions, PR32964 but including autocast expanding
   initial_typeresolution_info ti(s);
 
   ti.assert_resolvability = false;
@@ -6062,6 +6086,30 @@ static int initial_typeres_pass(systemtap_session& s)
           ti.current_function = fd;
           ti.t = pe_unknown;
           fd->body->visit (& ti);
+
+          // Check and run the autocast expanding visitor.
+          if (true || ti.num_available_autocasts > 0)
+            {
+              autocast_expanding_visitor aev (s, ti);
+              aev.replace (fd->body);
+              
+              // PR18079, rerun the const-folder / dead-block-remover
+              // if autocast evaluation enabled a @defined()
+              if (! aev.relaxed())
+                {
+                  // bool relaxed_p = true;
+                  const_folder cf (s, relaxed_p);
+                  cf.replace (fd->body);
+                  if (! s.unoptimized)
+                    {
+                      dead_control_remover dc (s, relaxed_p);
+                      fd->body->visit (&dc);
+                    }
+                  // (void) relaxed_p; // we judge success later by num_still_unresolved, not this flag
+                }
+              
+              ti.num_available_autocasts = 0;
+            }
         }
 
       for (unsigned j=0; j<s.probes.size(); j++)
@@ -6074,6 +6122,24 @@ static int initial_typeres_pass(systemtap_session& s)
           ti.t = pe_unknown;
           pn->body->visit (& ti);
 
+          // Check and run the autocast expanding visitor.
+          if (true || ti.num_available_autocasts > 0)
+            {
+              autocast_expanding_visitor aev (s, ti);
+              var_expand_const_fold_loop (s, pn->body, aev);
+              // PR18079, rerun the const-folder / dead-block-remover
+              // if autocast evaluation enabled a @defined()
+              if (! s.unoptimized)
+                {
+                  // bool relaxed_p;
+                  dead_control_remover dc (s, relaxed_p);
+                  pn->body->visit (&dc);
+                  // (void) relaxed_p; // we judge success later by num_still_unresolved, not this flag
+                }
+              
+              ti.num_available_autocasts = 0;
+            }
+          
           probe_point* pp = pn->sole_location();
           if (pp->condition)
             {
@@ -6109,7 +6175,6 @@ semantic_pass_types (systemtap_session& s)
   int rc = 0;
 
   // next pass: type inference
-  unsigned iterations = 0;
   if (!s.type_res_info)
     throw SEMANTIC_ERROR(_("internal error: type_res_info is NULL"));
   typeresolution_info& ti = *s.type_res_info;
@@ -6119,7 +6184,6 @@ semantic_pass_types (systemtap_session& s)
     {
       assert_no_interrupts();
 
-      iterations ++;
       ti.num_newly_resolved = 0;
       ti.num_still_unresolved = 0;
       ti.num_available_autocasts = 0;
@@ -6144,30 +6208,8 @@ semantic_pass_types (systemtap_session& s)
             //   ti.unresolved (fd->tok);
             for (unsigned i=0; i < fd->locals.size(); ++i)
               ti.check_local (fd->locals[i]);
-            
-            // Check and run the autocast expanding visitor.
-            if (ti.num_available_autocasts > 0)
-              {
-                autocast_expanding_visitor aev (s, ti);
-                aev.replace (fd->body);
 
-                // PR18079, rerun the const-folder / dead-block-remover
-                // if autocast evaluation enabled a @defined()
-                if (! aev.relaxed())
-                  {
-                    bool relaxed_p = true;
-                    const_folder cf (s, relaxed_p);
-                    cf.replace (fd->body);
-                    if (! s.unoptimized)
-                      {
-                        dead_control_remover dc (s, relaxed_p);
-                        fd->body->visit (&dc);
-                      }
-                    (void) relaxed_p; // we judge success later by num_still_unresolved, not this flag
-                  }
-
-                ti.num_available_autocasts = 0;
-              }
+            // PR32964: autocast resolution is now done early in initial_typeres_pass
           }
         catch (const semantic_error& e)
           {
@@ -6188,24 +6230,8 @@ semantic_pass_types (systemtap_session& s)
             pn->body->visit (& ti);
             for (unsigned i=0; i < pn->locals.size(); ++i)
               ti.check_local (pn->locals[i]);
-            
-            // Check and run the autocast expanding visitor.
-            if (ti.num_available_autocasts > 0)
-              {
-                autocast_expanding_visitor aev (s, ti);
-                var_expand_const_fold_loop (s, pn->body, aev);
-                // PR18079, rerun the const-folder / dead-block-remover
-                // if autocast evaluation enabled a @defined()
-                if (! s.unoptimized)
-                  {
-                    bool relaxed_p;
-                    dead_control_remover dc (s, relaxed_p);
-                    pn->body->visit (&dc);
-                    (void) relaxed_p; // we judge success later by num_still_unresolved, not this flag
-                  }
 
-                ti.num_available_autocasts = 0;
-              }
+            // PR32964: autocast resolution is now done early in initial_typeres_pass
             
             probe_point* pp = pn->sole_location();
             if (pp->condition)
@@ -6657,21 +6683,21 @@ void resolve_2types (Referrer* referrer, Referent* referent,
       // propagate from upstream
       re_type = t;
       r->resolved (re_tok, re_type);
-      // catch re_type/te_type mismatch later
+      resolve_2types (referrer, referent, r, t, accept_unknown);
     }
   else if (re_type == pe_unknown && te_type != pe_unknown)
     {
       // propagate from referent
       re_type = te_type;
       r->resolved (re_tok, re_type);
-      // catch re_type/t mismatch later
+      resolve_2types (referrer, referent, r, t, accept_unknown);
     }
   else if (re_type != pe_unknown && te_type == pe_unknown)
     {
       // propagate to referent
       te_type = re_type;
       r->resolved (re_tok, re_type, referent);
-      // catch re_type/t mismatch later
+      resolve_2types (referrer, referent, r, t, accept_unknown);      
     }
   else if (! accept_unknown)
     r->unresolved (re_tok);
@@ -7610,14 +7636,14 @@ typeresolution_info::mismatch (const binary_expression* e)
 {
   num_still_unresolved ++;
 
-  if (assert_resolvability && mismatch_complexity <= 1)
+  if (mismatch_complexity <= 1)
     {
       stringstream msg;
       msg << _F("type mismatch: left and right sides don't agree (%s vs %s)",
                 lex_cast(e->left->type).c_str(), lex_cast(e->right->type).c_str());
       session.print_error (SEMANTIC_ERROR (msg.str(), e->tok));
     }
-  else if (!assert_resolvability)
+  else
     mismatch_complexity = max(1, mismatch_complexity);
 }
 
@@ -7630,7 +7656,7 @@ typeresolution_info::mismatch (const token* tok, exp_type t1, exp_type t2)
 {
   num_still_unresolved ++;
 
-  if (assert_resolvability && mismatch_complexity <= 2)
+  if (mismatch_complexity <= 2)
     {
       stringstream msg;
       msg << _F("type mismatch: expected %s", lex_cast(t1).c_str());
@@ -7638,7 +7664,7 @@ typeresolution_info::mismatch (const token* tok, exp_type t1, exp_type t2)
         msg << _F(" but found %s", lex_cast(t2).c_str());
       session.print_error (SEMANTIC_ERROR (msg.str(), tok));
     }
-  else if (!assert_resolvability)
+  else
     mismatch_complexity = max(2, mismatch_complexity);
 }
 
@@ -7653,7 +7679,7 @@ typeresolution_info::mismatch (const token *tok, exp_type type,
 {
   num_still_unresolved ++;
 
-  if (assert_resolvability && mismatch_complexity <= 3)
+  if (mismatch_complexity <= 3)
     {
       assert(decl != NULL);
 
@@ -7711,7 +7737,7 @@ typeresolution_info::mismatch (const token *tok, exp_type type,
       err.set_chain(chain);
       session.print_error (err);
     }
-  else if (!assert_resolvability)
+  else
     mismatch_complexity = max(3, mismatch_complexity);
 }
 

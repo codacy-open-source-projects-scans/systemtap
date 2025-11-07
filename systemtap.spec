@@ -13,8 +13,8 @@
 %endif
 %{!?with_rpm: %global with_rpm 1}
 %{!?elfutils_version: %global elfutils_version 0.179}
-%{!?with_boost: %global with_boost 0}
-%ifarch %{ix86} x86_64 ppc ppc64 ppc64le aarch64
+%{!?with_boost: %global with_boost 1}
+%ifarch x86_64 ppc ppc64 ppc64le aarch64
 %{!?with_dyninst: %global with_dyninst 0%{?fedora} >= 18 || 0%{?rhel} >= 7}
 %else
 %{!?with_dyninst: %global with_dyninst 0}
@@ -45,6 +45,10 @@
 %{!?with_httpd: %global with_httpd 0}
 %{!?with_specific_python: %global with_specific_python 0%{?fedora} >= 31}
 %{!?with_sysusers: %global with_sysusers 0%{?fedora} >= 32 || 0%{?rhel} >= 9}
+# NB: can't turn this on by default on any distro version whose builder system
+# may run kernels different than the distro version itself.
+%{!?with_check: %global with_check 0}
+
 
 # Virt is supported on these arches, even on el7, but it's not in core EL7
 %if 0%{?rhel} && 0%{?rhel} <= 7
@@ -117,10 +121,16 @@ m     stapsys  stapsys\
 m     stapdev  stapusr\
 m     stapdev  stapdev
 
+%define _systemtap_server_preinstall_tmpfiles \
+# See systemd-tmpfiles(8) tmpfiles.d(5)\
+d /var/lib/stap-server 0750 stap-server stap-server -\
+d /var/lib/stap-server/.systemtap 0700 stap-server stap-server -\
+d /var/log/stap-server 0755 stap-server stap-server -\
+f /var/log/stap-server/log 0644 stap-server stap-server -
 
 Name: systemtap
 # PRERELEASE
-Version: 5.2
+Version: 5.4
 Release: 1%{?release_override}%{?dist}
 # for version, see also configure.ac
 
@@ -185,9 +195,7 @@ BuildRequires: pkgconfig(ncurses)
 BuildRequires: systemd
 %endif
 # Needed for libstd++ < 4.0, without <tr1/memory>
-%if %{with_boost}
 BuildRequires: boost-devel
-%endif
 %if %{with_crash}
 BuildRequires: crash-devel zlib-devel
 %endif
@@ -209,7 +217,7 @@ BuildRequires: xmlto /usr/share/xmlto/format/fo/pdf
 %endif
 %if %{with_emacsvim}
 # for _emacs_sitelispdir macros etc.
-BuildRequires: emacs
+BuildRequires: emacs-common
 %endif
 %if %{with_java}
 BuildRequires: java-devel
@@ -241,8 +249,14 @@ BuildRequires: libmicrohttpd-devel
 BuildRequires: libuuid-devel
 %endif
 %if %{with_sysusers}
-BuildRequires:  systemd-rpm-macros
+BuildRequires: systemd-rpm-macros
 %endif
+%if %{with_check}
+BuildRequires: kernel-devel
+# and some of the same Requires: as below
+BuildRequires: dejagnu gcc make
+%endif
+
 
 
 # Install requirements
@@ -381,6 +395,10 @@ boot-time probing if supported.
 Summary: Static probe support header files
 License: GPL-2.0-or-later AND CC0-1.0
 URL: https://sourceware.org/systemtap/
+%if 0%{?rhel} && 0%{?rhel} <= 10
+# for RHEL buildability compatibility, pull in sdt-dtrace at all times
+Requires: systemtap-sdt-dtrace = %{version}-%{release}
+%endif
 
 %description sdt-devel
 This package includes the <sys/sdt.h> header file used for static
@@ -722,6 +740,8 @@ mkdir -p %{buildroot}%{_sysusersdir}
 echo '%_systemtap_runtime_preinstall' > %{buildroot}%{_sysusersdir}/systemtap-runtime.conf
 echo '%_systemtap_server_preinstall' > %{buildroot}%{_sysusersdir}/systemtap-server.conf
 echo '%_systemtap_testsuite_preinstall' > %{buildroot}%{_sysusersdir}/systemtap-testsuite.conf
+mkdir -p %{buildroot}%{_tmpfilesdir}
+echo '%_systemtap_server_preinstall_tmpfiles' > %{buildroot}%{_tmpfilesdir}/systemtap-server.conf
 %endif
 
 
@@ -847,9 +867,18 @@ done
 %py3_shebang_fix %{buildroot}%{python3_sitearch} %{buildroot}%{_bindir}/*
 %endif
 
+%check
+%if %{with_check}
+make check RUNTESTFLAGS=environment_sanity.exp
+%endif
+
+
 %pre runtime
 %if %{with_sysusers}
+%if (0%{?fedora} && 0%{?fedora} < 42) || (0%{?rhel} && 0%{?rhel} < 11)
 echo '%_systemtap_runtime_preinstall' | systemd-sysusers --replace=%{_sysusersdir}/systemtap-runtime.conf -
+exit 0
+%endif
 %else
 getent group stapusr >/dev/null || groupadd -f -g 156 -r stapusr
 getent group stapsys >/dev/null || groupadd -f -g 157 -r stapsys
@@ -857,23 +886,30 @@ getent group stapdev >/dev/null || groupadd -f -g 158 -r stapdev
 getent passwd stapunpriv >/dev/null || \
   useradd -c "Systemtap Unprivileged User" -u 159 -g stapunpriv -d %{_localstatedir}/lib/stapunpriv -r -s /sbin/nologin stapunpriv 2>/dev/null || \
   useradd -c "Systemtap Unprivileged User" -g stapunpriv -d %{_localstatedir}/lib/stapunpriv -r -s /sbin/nologin stapunpriv
-%endif
 exit 0
+%endif
 
 %pre server
 %if %{with_sysusers}
+%if (0%{?fedora} && 0%{?fedora} < 42) || (0%{?rhel} && 0%{?rhel} < 11)
 echo '%_systemtap_server_preinstall' | systemd-sysusers --replace=%{_sysusersdir}/systemtap-server.conf -
+echo '%_systemtap_server_preinstall_tmpfiles' | systemd-tmpfiles --replace=%{_tmpfilesdir}/systemtap-server.conf -
+exit 0
+%endif
 %else
 getent group stap-server >/dev/null || groupadd -f -g 155 -r stap-server
 getent passwd stap-server >/dev/null || \
   useradd -c "Systemtap Compile Server" -u 155 -g stap-server -d %{_localstatedir}/lib/stap-server -r -s /sbin/nologin stap-server 2>/dev/null || \
   useradd -c "Systemtap Compile Server" -g stap-server -d %{_localstatedir}/lib/stap-server -r -s /sbin/nologin stap-server
-%endif
 exit 0
+%endif
 
 %pre testsuite
 %if %{with_sysusers}
+%if (0%{?fedora} && 0%{?fedora} < 42) || (0%{?rhel} && 0%{?rhel} < 11)
 echo '%_systemtap_testsuite_preinstall' | systemd-sysusers --replace=%{_sysusersdir}/systemtap-testsuite.conf -
+exit 0
+%endif
 %else
 getent passwd stapusr >/dev/null || \
     useradd -c "Systemtap 'stapusr' User" -g stapusr -r -s /sbin/nologin stapusr
@@ -881,8 +917,8 @@ getent passwd stapsys >/dev/null || \
     useradd -c "Systemtap 'stapsys' User" -g stapsys -G stapusr -r -s /sbin/nologin stapsys
 getent passwd stapdev >/dev/null || \
     useradd -c "Systemtap 'stapdev' User" -g stapdev -G stapusr -r -s /sbin/nologin stapdev
-%endif
 exit 0
+%endif
 
 %post server
 
@@ -1090,6 +1126,7 @@ exit 0
 %if %{with_systemd}
 %{_unitdir}/stap-server.service
 %{_tmpfilesdir}/stap-server.conf
+%{_tmpfilesdir}/systemtap-server.conf
 %else
 %{initdir}/stap-server
 %dir %{_sysconfdir}/stap-server/conf.d
@@ -1326,6 +1363,18 @@ exit 0
 
 # PRERELEASE
 %changelog
+* Fri Oct 31 2025 Frank Ch. Eigler <fche@redhat.com> - 5.4-1
+- Upstream release, see wiki page below for detailed notes.
+  https://sourceware.org/systemtap/wiki/SystemTapReleases
+
+* Fri May 02 2025 Frank Ch. Eigler <fche@redhat.com> - 5.3-1
+- Upstream release, see wiki page below for detailed notes.
+  https://sourceware.org/systemtap/wiki/SystemTapReleases
+
+* Fri Nov 08 2024 Frank Ch. Eigler <fche@redhat.com> - 5.2-1
+- Upstream release, see wiki page below for detailed notes.
+  https://sourceware.org/systemtap/wiki/SystemTapReleases
+  
 * Thu Aug 08 2024 Lumír Balhar <lbalhar@redhat.com> - 5.2-pre
 - Final split of sdt-dtrace and sdt-devel (rhbz#2296275)
   https://fedoraproject.org/wiki/Changes/Separate_dtrace_package

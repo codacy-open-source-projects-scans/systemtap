@@ -31,7 +31,7 @@ extern "C" {
 }
 
 #include "privilege.h"
-#include "util.h"
+#include "staputil.h"
 #include "stringtable.h"
 
 /* statistical operations used with a global */
@@ -95,7 +95,7 @@ struct statistic_decl
   int64_t linear_step;
   int bit_shift;
   int stat_ops;
-  bool operator==(statistic_decl const & other)
+  bool operator==(statistic_decl const & other) const
   {
     return type == other.type
       && linear_low == other.linear_low
@@ -163,10 +163,8 @@ public:
   void version ();
   void usage (int exitcode);
   void check_options (int argc, char * const argv []);
-  // Mark morehelp as used, otherwise LTO might optimize
-  // this one out, and testcases such as at_var_mark.exp
-  // would miss it.
-  static const char* morehelp __attribute__ ((used));
+
+  static const char* morehelp; // only used for testing; trickery in systemtap_session::usage() keeps it ref'd
 
   // NB: It is very important for all of the above (and below) fields
   // to be cleared in the systemtap_session ctor (session.cxx).
