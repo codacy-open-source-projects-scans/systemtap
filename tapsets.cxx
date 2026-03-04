@@ -1589,6 +1589,13 @@ dwarf_query::add_probe_point(interned_string dw_funcname,
 	      symbol_table *sym_table = mi->sym_table;
 	      func_info *symbol = sym_table->get_func_containing_address(addr);
 
+              // RHEL-149811: misbehaving kernel module/symbol
+              // processing can generate wrong addresses and leave symbol=null
+              if (!symbol)
+                throw SEMANTIC_ERROR(_F("can't find symbol for address %#"
+                                        PRIx64 " for module %s", addr,
+                                        module_val.to_string().c_str()));
+              
 	      // Do not use LEP to find offset here. When 'symbol_name'
 	      // is used to register probe, kernel itself will find LEP.
 	      Dwarf_Addr offset = orig_addr - symbol->addr;
@@ -12995,6 +13002,19 @@ tracepoint_builder::get_tracequery_modules(systemtap_session& s,
       osrc << "#define PARAMS(args...) args" << endl;
       osrc << "#endif" << endl;
 
+      // 6.16 routes TRACE_EVENT* through DECLARE_TRACE_EVENT instead of DECLARE_TRACE
+      osrc << "#undef DECLARE_TRACE_EVENT" << endl;
+      osrc << "#define DECLARE_TRACE_EVENT(name, proto, args) \\" << endl;
+      osrc << "  DECLARE_TRACE(name, PARAMS(proto), PARAMS(args))" << endl;
+      
+      osrc << "#undef DECLARE_TRACE_EVENT_CONDITION" << endl;
+      osrc << "#define DECLARE_TRACE_EVENT_CONDITION(name, proto,    args, cond) \\" << endl;
+      osrc << "  DECLARE_TRACE(name, PARAMS(proto), PARAMS(args))" << endl;
+      
+      osrc << "#undef DECLARE_TRACE_EVENT_SYSCALL" << endl;
+      osrc << "#define DECLARE_TRACE_EVENT_SYSCALL(name, proto, args)   \\" << endl;
+      osrc << "  DECLARE_TRACE(name, PARAMS(proto), PARAMS(args))" << endl;
+      
       // 6.13 handle DECLARE_TRACE_SYSCALL for sys_enter and sys_exit also
       osrc << "#undef DECLARE_TRACE_SYSCALL" << endl;
       osrc << "#define DECLARE_TRACE_SYSCALL(name, proto, args) \\" << endl;
@@ -13074,7 +13094,11 @@ tracepoint_builder::get_tracequery_modules(systemtap_session& s,
 	      osrc << "#define TRACE_EVENT_FN(name, proto, args, tstruct, assign, print, reg, unreg) \\" << endl;
 	      osrc << "  struct stapprobe_##name { unsigned long long pad; struct { tstruct } data; } stapprobe_##name;" << endl;
 
-	      osrc << "#undef TRACE_EVENT_CONDITION" << endl;
+              osrc << "#undef TRACE_EVENT_SYSCALL" << endl;
+              osrc << "#define TRACE_EVENT_SYSCALL(name, proto, args, tstruct, assign, print, reg, unreg) \\" << endl;
+              osrc << "  struct stapprobe_##name { unsigned long long pad; struct { tstruct } data; } stapprobe_##name;" << endl;
+
+              osrc << "#undef TRACE_EVENT_CONDITION" << endl;
 	      osrc << "#define TRACE_EVENT_CONDITION(name, proto, args, cond, tstruct, assign, print) \\" << endl;
 	      osrc << " struct stapprobe_##name { unsigned long long pad; struct { tstruct } data; } stapprobe_##name;" << endl;
 	  }
