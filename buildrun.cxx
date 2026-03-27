@@ -146,6 +146,10 @@ make_any_make_cmd(systemtap_session& s, const string& dir, const string& target)
   make_cmd.push_back("CC_VERSION_TEXT=foo");
   make_cmd.push_back("CONFIG_CC_VERSION_TEXT=foo");
 
+  // Suppress pahole version warning
+  make_cmd.push_back("PAHOLE_VERSION=0");
+  make_cmd.push_back("CONFIG_PAHOLE_VERSION=0");
+
   // Add any custom kbuild flags
   make_cmd.insert(make_cmd.end(), s.kbuildflags.begin(), s.kbuildflags.end());
 
@@ -508,6 +512,7 @@ compile_pass (systemtap_session& s)
   output_exportconf(s, o2, "signal_wake_up_state", "STAPCONF_SIGNAL_WAKE_UP_STATE_EXPORTED");
   output_exportconf(s, o2, "signal_wake_up", "STAPCONF_SIGNAL_WAKE_UP_EXPORTED");
   output_exportconf(s, o2, "__lock_task_sighand", "STAPCONF___LOCK_TASK_SIGHAND_EXPORTED");
+  output_exportconf(s, o2, "lock_task_sighand", "STAPCONF_LOCK_TASK_SIGHAND_EXPORTED");
   output_exportconf(s, o2, "atomic_dec_and_lock", "STAPCONF_ATOMIC_DEC_AND_LOCK_EXPORTED_PR33978");
 
   output_autoconf(s, o, cs, "autoconf-pagefault_disable.c", "STAPCONF_PAGEFAULT_DISABLE", NULL);
