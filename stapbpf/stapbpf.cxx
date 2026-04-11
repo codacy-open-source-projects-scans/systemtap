@@ -655,14 +655,14 @@ maybe_collect_kprobe(const char *name, unsigned name_idx,
 }
 
 static void
-collect_procfsprobe(const char *name, Elf_Data* prog) 
+collect_procfsprobe(const char *name, Elf_Data* prog)
 {
-  unsigned long umask; 
+  unsigned long umask;
   unsigned long maxsize_val;
   char type;
-  char fifoname[PATH_MAX];
+  char fifoname[4095+1];
 
-  int res = sscanf(name, "procfsprobe/%lu/%c/%lu/%s", &umask, &type, &maxsize_val, fifoname);
+  int res = sscanf(name, "procfsprobe/%lu/%c/%lu/%4095s", &umask, &type, &maxsize_val, fifoname);
 
   if (res != 4)
     fatal("unable to parse name of probe: %s", name);
@@ -1852,6 +1852,8 @@ perf_event_loop(pthread_t main_thread)
     = map_attrs[bpf::globals::perf_event_map_idx].max_entries;
   unsigned n_active_cpus
     = count_active_cpus();
+  if (n_active_cpus > (size_t)-1 / sizeof(struct pollfd))
+    fatal("Too many active CPUs for pollfd allocation\n");
   struct pollfd *pmu_fds
     = (struct pollfd *)malloc(n_active_cpus * sizeof(struct pollfd));
   vector<unsigned> cpuids;

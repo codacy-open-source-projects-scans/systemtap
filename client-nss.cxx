@@ -859,21 +859,17 @@ nss_client_backend::compile_using_server (
 
       // Initialize the NSS libraries.
       const char *cert_dir = i->c_str ();
-      context = nssInitContext (cert_dir);
+      context = nssInitContext (cert_dir, 0, 1, 0);
       if (context == NULL)
 	{
 	  // Message already issued.
 	  continue; // try next database
 	}
 
-      // Enable all cipher suites.
-      // SSL_ClearSessionCache is required for the new settings to take effect.
-      /* Some NSS versions don't do this correctly in NSS_SetDomesticPolicy. */
-      do {
-        const PRUint16 *cipher;
-        for (cipher = SSL_GetImplementedCiphers(); *cipher != 0; ++cipher)
-          SSL_CipherPolicySet(*cipher, SSL_ALLOWED);
-      } while (0);
+      // Enable domestic (strong) cipher suites policy.
+      // Previously enabled ALL cipher suites including weak ones like DES, RC4, export ciphers.
+      // Now use NSS domestic policy which enables strong cipher suites only.
+      NSS_SetDomesticPolicy();
       SSL_ClearSessionCache ();
   
       server_zipfile = s.tmpdir + "/server.zip";

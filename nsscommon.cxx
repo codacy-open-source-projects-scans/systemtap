@@ -178,15 +178,186 @@ nssError (void)
   nsscommon_error (_F("(%d) %s", errorNumber, errorText));
 }
 
+/* Function: int check_db_file_permissions (const char *cert_db_file);
+ *
+ * Check that the given certificate database file has
+ * the correct permissions.
+ *
+ * Returns 0 if there is an error, 1 otherwise.
+ */
+static int
+check_db_file_permissions (const char *cert_db_file) {
+  struct stat info;
+  int rc;
+
+  rc = stat (cert_db_file, & info);
+  if (rc)
+    {
+      fprintf (stderr, "Could not obtain information on certificate database file %s.\n",
+	      cert_db_file);
+      perror ("");
+      return 0;
+    }
+
+  rc = 1; /* ok */
+
+  /* The owner of the file must be root.  */
+  if (info.st_uid != 0)
+    {
+      fprintf (stderr, "Certificate database file %s must be owned by root.\n",
+	       cert_db_file);
+      rc = 0;
+    }
+
+  /* Check the access permissions of the file.  */
+  if ((info.st_mode & S_IRUSR) == 0)
+    fprintf (stderr, "Certificate database file %s should be readable by the owner.\n", cert_db_file);
+  if ((info.st_mode & S_IWUSR) == 0)
+    fprintf (stderr, "Certificate database file %s should be writable by the owner.\n", cert_db_file);
+  if ((info.st_mode & S_IXUSR) != 0)
+    {
+      fprintf (stderr, "Certificate database file %s must not be executable by the owner.\n", cert_db_file);
+      rc = 0;
+    }
+  if ((info.st_mode & S_IRGRP) == 0)
+    {
+      fprintf (stderr, "Certificate database file %s should be readable by the group.\n", cert_db_file);
+      rc = 0;
+    }
+  if ((info.st_mode & S_IWGRP) != 0)
+    {
+      fprintf (stderr, "Certificate database file %s must not be writable by the group.\n", cert_db_file);
+      rc = 0;
+    }
+  if ((info.st_mode & S_IXGRP) != 0)
+    {
+      fprintf (stderr, "Certificate database file %s must not be executable by the group.\n", cert_db_file);
+      rc = 0;
+    }
+  if ((info.st_mode & S_IROTH) == 0)
+    {
+      fprintf (stderr, "Certificate database file %s should be readable by others.\n", cert_db_file);
+      rc = 0;
+    }
+  if ((info.st_mode & S_IWOTH) != 0)
+    {
+      fprintf (stderr, "Certificate database file %s must not be writable by others.\n", cert_db_file);
+      rc = 0;
+    }
+  if ((info.st_mode & S_IXOTH) != 0)
+    {
+      fprintf (stderr, "Certificate database file %s must not be executable by others.\n", cert_db_file);
+      rc = 0;
+    }
+
+  return rc;
+}
+
+/* Function: int check_cert_db_permissions (const char *cert_db_path);
+ *
+ * Check that the given certificate directory and its contents have
+ * the correct permissions.
+ *
+ * Returns 0 if there is an error, 1 otherwise.
+ */
+static int
+check_cert_db_permissions (const char *cert_db_path) {
+  struct stat info;
+  char *fileName;
+  int rc;
+
+  rc = stat (cert_db_path, & info);
+  if (rc)
+    {
+      /* It is ok if the directory does not exist. This simply means that no signing
+	 certificates have been authorized yet.  */
+      if (errno == ENOENT)
+	return 0;
+      fprintf (stderr, "Could not obtain information on certificate database directory %s.\n",
+	       cert_db_path);
+      perror ("");
+      return 0;
+    }
+
+  if (! S_ISDIR (info.st_mode))
+    {
+      fprintf (stderr, "Certificate database %s is not a directory.\n", cert_db_path);
+      return 0;
+    }
+
+  /* The owner of the database must be root.  */
+  if (info.st_uid != 0)
+    {
+      fprintf (stderr, "Certificate database directory %s must be owned by root.\n", cert_db_path);
+      return 0;
+    }
+
+  rc = 1; /* ok */
+
+  /* Check the database directory access permissions  */
+  if ((info.st_mode & S_IRUSR) == 0)
+    fprintf (stderr, "Certificate database %s should be readable by the owner.\n", cert_db_path);
+  if ((info.st_mode & S_IWUSR) == 0)
+    fprintf (stderr, "Certificate database %s should be writable by the owner.\n", cert_db_path);
+  if ((info.st_mode & S_IXUSR) == 0)
+    fprintf (stderr, "Certificate database %s should be searchable by the owner.\n", cert_db_path);
+  if ((info.st_mode & S_IRGRP) == 0)
+    fprintf (stderr, "Certificate database %s should be readable by the group.\n", cert_db_path);
+  if ((info.st_mode & S_IWGRP) != 0)
+    {
+      fprintf (stderr, "Certificate database %s must not be writable by the group.\n", cert_db_path);
+      rc = 0;
+    }
+  if ((info.st_mode & S_IXGRP) == 0)
+    fprintf (stderr, "Certificate database %s should be searchable by the group.\n", cert_db_path);
+  if ((info.st_mode & S_IROTH) == 0)
+    fprintf (stderr, "Certificate database %s should be readable by others.\n", cert_db_path);
+  if ((info.st_mode & S_IWOTH) != 0)
+    {
+      fprintf (stderr, "Certificate database %s must not be writable by others.\n", cert_db_path);
+      rc = 0;
+    }
+  if ((info.st_mode & S_IXOTH) == 0)
+    fprintf (stderr, "Certificate database %s should be searchable by others.\n", cert_db_path);
+
+  /* Now check the permissions of the critical files.  */
+  fileName = (char *) PORT_Alloc (strlen (cert_db_path) + 11);
+  if (! fileName)
+    {
+      fprintf (stderr, "Unable to allocate memory for certificate database file names\n");
+      return 0;
+    }
+
+  /* These uses of sprintf() are OK, since we just allocated the
+   * string to be the correct length. */
+  sprintf (fileName, "%s/cert8.db", cert_db_path);
+  rc &= check_db_file_permissions (fileName);
+  sprintf (fileName, "%s/key3.db", cert_db_path);
+  rc &= check_db_file_permissions (fileName);
+  sprintf (fileName, "%s/secmod.db", cert_db_path);
+  rc &= check_db_file_permissions (fileName);
+
+  PORT_Free (fileName);
+
+  if (rc == 0)
+    fprintf (stderr, "Unable to use certificate database %s due to errors.\n", cert_db_path);
+
+  return rc;
+}
+
 extern "C"
 NSSInitContext*
-nssInitContext (const char *db_path, int readWrite, int issueMessage)
+nssInitContext (const char *db_path, int readWrite, int issueMessage, int checkPermissions)
 {
   NSSInitContext *context;
   PRUint32 flags = (readWrite ? NSS_INIT_READONLY : 0) | NSS_INIT_OPTIMIZESPACE;
 
   string full_db_path = add_cert_db_prefix (db_path);
   db_path = full_db_path.c_str();
+
+  if (checkPermissions && !check_cert_db_permissions(db_path))
+    return NULL;
+
   // DEBUG
   char *sd = getenv("SYSTEMTAP_DIR");
   string nssil_tmp = "/tmp/nssinit.log";
@@ -469,11 +640,8 @@ generate_private_key (const string &db_path, PK11SlotInfo *slot, SECKEYPublicKey
     }
 
   // Do some random-number initialization.
-  // TODO: We can do better.
-  srand (time (NULL));
   char randbuf[64];
-  for (unsigned i = 0; i < sizeof (randbuf); ++i)
-    randbuf[i] = rand ();
+  PK11_GenerateRandom ((unsigned char *)randbuf, sizeof (randbuf));
   PK11_RandomUpdate (randbuf, sizeof (randbuf));
   memset (randbuf, 0, sizeof (randbuf));
 
@@ -1585,7 +1753,7 @@ void sign_file (
 
   /* Sign the file. */
   /* Set up the signing context.  */
-  sgn = SGN_NewContext (SEC_OID_PKCS1_SHA1_WITH_RSA_ENCRYPTION, privKey);
+  sgn = SGN_NewContext (SEC_OID_PKCS1_SHA256_WITH_RSA_ENCRYPTION, privKey);
   if (! sgn) 
     {
       nsscommon_error (_("Could not create signing context"));
@@ -1794,12 +1962,12 @@ read_cert_info_from_file (const string &certPath, string &fingerprint)
     }
 
   // Get the fingerprint from the signature.
-  unsigned char fingerprint_buf[SHA1_LENGTH];
+  unsigned char fingerprint_buf[32]; // SHA256_LENGTH
   SECItem fpItem;
-  rv = PK11_HashBuf(SEC_OID_SHA1, fingerprint_buf, derCert.data, derCert.len);
+  rv = PK11_HashBuf(SEC_OID_SHA256, fingerprint_buf, derCert.data, derCert.len);
   if (rv)
     {
-      nsscommon_error (_F("Could not decode SHA1 fingerprint from file %s",
+      nsscommon_error (_F("Could not decode SHA256 fingerprint from file %s",
 			  certPath.c_str ()));
       goto done;
     }
@@ -1808,7 +1976,7 @@ read_cert_info_from_file (const string &certPath, string &fingerprint)
   str = CERT_Hexify(&fpItem, 1);
   if (! str)
   {
-      nsscommon_error (_F("Could not hexify SHA1 fingerprint from file %s",
+      nsscommon_error (_F("Could not hexify SHA256 fingerprint from file %s",
 			  certPath.c_str ()));
       goto done;
   }

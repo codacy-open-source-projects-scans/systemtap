@@ -963,6 +963,15 @@ readDataFromSocket(PRFileDesc *sslSocket, const char *requestFileName)
   /* Convert numBytesExpected from network byte order to host byte order.  */
   numBytesExpected = ntohl (numBytesExpected);
 
+  /* Reject negative sizes to prevent potential issues with signed integer comparisons.
+     Although the code handles negative values safely by not reading and then erroring,
+     we explicitly check to quiet static analysis tools. */
+  if (numBytesExpected < 0)
+    {
+      server_error (_("Invalid request size: negative value"));
+      goto done;
+    }
+
   /* If 0 bytes are expected, then we were contacted only to obtain our certificate.
      There is no client request. */
   if (numBytesExpected == 0)
@@ -2271,8 +2280,12 @@ accept_connections (PRFileDesc *listenSocket, CERTCertificate *cert)
       /* Create the argument structure to pass to pthread_create
        * (or directly to handle_connection if max_threads == 0 */
       t_arg = (thread_arg *)malloc(sizeof(*t_arg));
-      if (t_arg == 0)
-        fatal(_("No memory available for new thread arg!"));
+      if (!t_arg)
+        {
+          server_error(_("No memory available for new thread arg!"));
+          PR_Close(tcpSocket);
+          continue;
+        }
       t_arg->tcpSocket = tcpSocket;
       t_arg->cert = cert;
       t_arg->privKey = SECKEY_CopyPrivateKey(privKey); /* pass by value */
@@ -2319,7 +2332,7 @@ server_main (PRFileDesc *listenSocket)
   SECStatus secStatus;
 
   // Initialize NSS.
-  context = nssInitContext (cert_db_path.c_str ());
+  context = nssInitContext (cert_db_path.c_str (), 0, 1, 0);
   if (context == NULL)
     {
       // Message already issued.
@@ -2330,18 +2343,10 @@ server_main (PRFileDesc *listenSocket)
   CERTCertificate *cert = NULL;
   bool serverCacheConfigured = false;
 
-  // Enable all cipher suites.
-  // NB: The NSS docs say that SSL_ClearSessionCache is required for the new settings to take
-  // effect, however, calling it puts NSS in a state where it will not shut down cleanly.
-  // We need to be able to shut down NSS cleanly if we are to generate a new certificate when
-  // ours expires. It should be noted however, thet SSL_ClearSessionCache only clears the
-  // client cache, and we are a server.
-  /* Some NSS versions don't do this correctly in NSS_SetDomesticPolicy. */
-  do {
-    const PRUint16 *cipher;
-    for (cipher = SSL_GetImplementedCiphers(); *cipher != 0; ++cipher)
-      SSL_CipherPolicySet(*cipher, SSL_ALLOWED);
-  } while (0);
+  // Enable domestic (strong) cipher suites policy.
+  // Previously enabled ALL cipher suites including weak ones like DES, RC4, export ciphers.
+  // Now use NSS domestic policy which enables strong cipher suites only.
+  NSS_SetDomesticPolicy();
   //      SSL_ClearSessionCache ();
 
   // Configure the SSL session cache for a single process server with the default settings.

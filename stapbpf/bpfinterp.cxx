@@ -805,6 +805,7 @@ bpf_handle_transport_msg(void *buf, size_t size,
       if (!ctx->in_printf)
         stapbpf_abort("printf not started");
       arg = malloc(msg_size);
+      if (!arg) stapbpf_abort("malloc failed for printf argument");
       memcpy(arg, msg_content, msg_size);
       ctx->printf_args.push_back(arg);
       ctx->printf_arg_types.push_back(msg_type);
@@ -1042,8 +1043,10 @@ bpf_interpret(size_t ninsns, const struct bpf_insn insns[],
 	    {
 	    case BPF_FUNC_map_lookup_elem:
 	      {
+                if (regs[1] >= ctx->map_fds->size()) stapbpf_abort("invalid map index");
                 // allocate correctly sized buffer and store it in map_values
                 uint64_t *lookup_tmp = (uint64_t *)malloc(map_attrs[regs[1]].value_size);
+                if (!lookup_tmp) stapbpf_abort("map value allocation failed");
                 map_values.push_back(lookup_tmp);
 
 	        int res = bpf_lookup_elem(map_fds[regs[1]], as_ptr(regs[2]),
