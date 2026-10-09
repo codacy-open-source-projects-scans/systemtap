@@ -37,8 +37,8 @@
 	  set_ulong_arg(3, count)
 %)
 
-probe syscall.pread = dw_syscall.pread !, nd_syscall.pread ? {}
-probe syscall.pread.return = dw_syscall.pread.return !,
+probe syscall.pread = tp_syscall.pread !, dw_syscall.pread !, nd_syscall.pread ? {}
+probe syscall.pread.return = tp_syscall.pread.return !, dw_syscall.pread.return !,
                              nd_syscall.pread.return ? {}
 
 # dw_pread _____________________________________________________
@@ -92,7 +92,7 @@ probe __syscall.pread.return = kernel.function("sys_pread64").return
 probe nd_syscall.pread = nd1_syscall.pread!, nd2_syscall.pread!, tp_syscall.pread
   { }
 
-probe nd1_syscall.pread =
+probe nd1_syscall.pread = 
 %( arch == "s390" %?
 	__nd1_syscall.compat_pread ?,
 %)
@@ -103,7 +103,7 @@ probe nd1_syscall.pread =
 	@_SYSCALL_PREAD_REGARGS
 	@_SYSCALL_PREAD_ARGSTR
 }
-probe __nd1_syscall.pread = kprobe.function("sys_pread64")
+probe __nd1_syscall.pread = kprobe.function("sys_pread64") ?
 {
 	asmlinkage()
 %( arch == "s390" %?
@@ -154,16 +154,16 @@ probe __nd2_syscall.compat_pread = kprobe.function(@arch_syscall_prefix "compat_
 %)
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
 probe tp_syscall.pread = __tp_syscall.pread, __tp_syscall.compat_pread 
 {
 	@_SYSCALL_PREAD_NAME
 	@_SYSCALL_PREAD_REGARGS
 	@_SYSCALL_PREAD_ARGSTR
 }
-probe __tp_syscall.pread = kernel.trace("sys_enter")
+probe __tp_syscall.pread = tp_syscall("pread64") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_gate(@const("__NR_pread64"))
 	offset = longlong_arg(4)
 },
@@ -174,9 +174,9 @@ probe __tp_syscall.pread = kernel.trace("sys_enter")
 	  set_longlong_arg(4, offset)
 %)
 }
-probe __tp_syscall.compat_pread = kernel.trace("sys_enter")
+probe __tp_syscall.compat_pread = tp_syscall("~compat_pread64") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__compat_syscall_gate(@const("__NR_compat_pread64"))
 	offset = (u32_arg(5) << 32) + u32_arg(4)
 },
@@ -193,7 +193,7 @@ probe __tp_syscall.compat_pread = kernel.trace("sys_enter")
 probe nd_syscall.pread.return = nd1_syscall.pread.return!, nd2_syscall.pread.return!, tp_syscall.pread.return
   { }
   
-probe nd1_syscall.pread.return =
+probe nd1_syscall.pread.return = 
 %( arch == "s390" %?
 	kprobe.function("sys32_pread64").return ?,
 	kprobe.function("compat_sys_s390_pread64").return ?,
@@ -203,7 +203,7 @@ probe nd1_syscall.pread.return =
 	@_SYSCALL_PREAD_NAME
 	@SYSC_RETVALSTR(returnval())
 }
-probe __nd1_syscall.pread.return = kprobe.function("sys_pread64").return
+probe __nd1_syscall.pread.return = kprobe.function("sys_pread64").return ?
 {
 %( arch == "s390" %?
 	@__syscall_gate(@const("__NR_pread64"))
@@ -218,11 +218,11 @@ probe nd2_syscall.pread.return = kprobe.function(@arch_syscall_prefix "sys_pread
 	@SYSC_RETVALSTR(returnval())
 }
  
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.pread.return = kernel.trace("sys_exit")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.pread.return = tp_syscall("pread64,~compat_pread64").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_compat_gate(@const("__NR_pread64"), @const("__NR_compat_pread64"))
 	@_SYSCALL_PREAD_NAME
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }

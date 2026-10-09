@@ -2,7 +2,7 @@ SYSTEMTAP EXAMPLES INDEX
 (see also keyword-index.txt)
 
 
-For systemtap version 5.5.
+For systemtap version 5.7.
 
 apps/gmalloc_watch.stp - Tracing glib2 memory allocations
 keywords: trace
@@ -255,15 +255,6 @@ keywords: _best trace callgraph
 
   # stap para-callgraph.stp 'kernel.function("*@fs/proc*.c")' \
   'kernel.function("vfs_read")' -c "cat /proc/sys/vm/* || true"
-
-
-general/pyexample.stp - SystemTap python 2 support tapset
-keywords: simple
-
-  A python support tapset that displays backtraces and variable values
-
-  # PYTHONPATH=$PYEXECDIR stap -g --suppress-time-limits -c \
-  '/usr/bin/python3 -m HelperSDT pyexample.py 35' pyexample.stp python2
 
 
 general/pyexample.stp - SystemTap python 3 support tapset
@@ -1039,6 +1030,23 @@ keywords: network nfs
   filesystems.
 
   # stap autofs4.stp -T 1
+
+
+network/bpf_xdp.stp - Count Incoming Packets Per Protocol via XDP
+keywords: network xdp bpf
+
+  Decode the ethertype of incoming packets using an XDP program
+
+  # stap --runtime=bpf bpf_xdp.stp -T 3
+
+
+network/bpf_xdp_guru.stp - Bump IPv6 Hop Limits for Proxy Health Checks
+keywords: network xdp bpf
+
+  Count incoming IPv6 frames via an XDP program and rewrite the hop
+
+  # stap --runtime=bpf -g bpf_xdp_guru.stp -c "ping -6 -t 1 -c 10 localhost \
+  >/dev/null" -T 3
 
 
 network/connect_stat.stp - Show Process Ancestry for IP Connections
@@ -2079,6 +2087,36 @@ security-band-aids/cve-2023-4911.stp - cve-2023-4911 security band-aid
 keywords: security guru
 
   historical emergency security band-aid, for reference/education only
+
+
+security-band-aids/cve-2026-31431.stp - cve-2026-31431 security band-aid
+keywords: security guru
+
+  EXPERIMENTAL emergency security band-aid, for reference/education
+  only
+
+
+security-band-aids/cve-2026-31431bpf.stp - cve-2026-31431 security band-aid (BPF LSM version)
+keywords: security guru bpf lsm
+
+  EXPERIMENTAL emergency security band-aid using BPF LSM hooks, blocks
+  AF_ALG AEAD socket binds
+
+  # stap -g --runtime=bpf -p4 cve-2026-31431bpf.stp
+
+
+security-band-aids/cve-2026-46300.stp - cve-2026-46300 security band-aid
+keywords: security guru
+
+  EXPERIMENTAL emergency security band-aid, for reference/education
+  only
+
+
+security-band-aids/cve-2026-64600.stp - cve-2026-64600 security band-aid
+keywords: security guru
+
+  EXPERIMENTAL emergency security band-aid, for reference/education
+  only
 
 
 stapgames/2048.stp - 2048

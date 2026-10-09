@@ -8,6 +8,9 @@ if Werror
 AM_CFLAGS += -Werror
 AM_CXXFLAGS += -Werror
 endif
+if enable_glibcxx_debug
+AM_CXXFLAGS += -D_GLIBCXX_DEBUG -D_GLIBCXX_DEBUG_PEDANTIC
+endif
 AM_CPPFLAGS = -D_GNU_SOURCE
 AM_CPPFLAGS += -I$(srcdir)/../includes
 AM_CPPFLAGS += -I$(builddir)/../includes/sys
@@ -33,10 +36,11 @@ noinst_PROGRAMS += dynsdt
 man_MANS = stapdyn.8
 
 stapdyn_SOURCES = stapdyn.cxx mutator.cxx mutatee.cxx \
-				  dynprobe.cxx dynutil.cxx ../staputil.cxx
-stapdyn_CXXFLAGS = $(AM_CXXFLAGS) @DYNINST_CXXFLAGS@ $(debuginfod_CFLAGS)
+				  dynprobe.cxx dynhwbkpt.cxx dynubacktrace.cxx \
+				  dynutil.cxx ../staputil.cxx
+stapdyn_CXXFLAGS = $(AM_CXXFLAGS) @DYNINST_CXXFLAGS@ $(debuginfod_CFLAGS) @WNO_TEMPLATE_BODY@
 stapdyn_LDFLAGS = $(AM_LDFLAGS) @DYNINST_LDFLAGS@ $(debuginfod_LDFLAGS)
-stapdyn_LDADD = -ldl -ldyninstAPI -lsymtabAPI -lpthread $(debuginfod_LIBS)
+stapdyn_LDADD = -ldl -ldyninstAPI -lsymtabAPI -lpcontrol -lstackwalk -lcommon -ldw -lelf -lpthread $(debuginfod_LIBS)
 stapdyn_CFLAGS = $(debuginfod_CFLAGS)
 
 dynsdt_SOURCES = dynsdt.cxx dynutil.cxx ../staputil.cxx

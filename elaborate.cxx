@@ -35,9 +35,44 @@ extern "C" {
 #include <algorithm>
 #include <iterator>
 #include <climits>
+#include <chrono>
+#include <thread>
+#include <mutex>
+#include <atomic>
+#include <exception>
+
+#ifdef HAVE_BOOST_ASIO_THREAD_POOL_HPP
+#include <boost/asio/thread_pool.hpp>
+#else
+#error "need boost thread_pool.hpp"
+#endif
+
+#ifdef HAVE_BOOST_ASIO_POST_HPP
+#include <boost/asio/post.hpp>
+#else
+#error "need boost post.hpp"
+#endif
 
 
 using namespace std;
+
+// RAII bump for session.suppress_costly_diagnostics (atomic).
+struct suppress_costly_diagnostics_guard
+{
+  systemtap_session& s;
+  bool bumped;
+  suppress_costly_diagnostics_guard (systemtap_session& s_in, bool bump)
+    : s(s_in), bumped(bump)
+  {
+    if (bumped)
+      s.suppress_costly_diagnostics.fetch_add (1, std::memory_order_relaxed);
+  }
+  ~suppress_costly_diagnostics_guard ()
+  {
+    if (bumped)
+      s.suppress_costly_diagnostics.fetch_sub (1, std::memory_order_relaxed);
+  }
+};
 
 
 // ------------------------------------------------------------------------
@@ -218,19 +253,73 @@ derived_probe::print_dupe_stamp_unprivileged_process_owner(ostream& o)
 // ------------------------------------------------------------------------
 // Members of derived_probe_builder
 
-void
+vector<derived_probe*>
+derived_probe_builder::run_build(systemtap_session & sess,
+                                 probe* base,
+                                 probe_point* location,
+                                 literal_map_t const & parameters)
+{
+  // Prefer plain lock/unlock over unique_lock so build() can
+  // temporarily_release_builder_lock without fighting a unique_lock
+  // that still thinks it owns the mutex.
+  bool took = false;
+  if (serialize_builds ())
+    {
+      lock.lock ();
+      took = true;
+    }
+  try
+    {
+      vector<derived_probe*> got
+        = build (sess, base, location, parameters);
+      if (took)
+        lock.unlock ();
+      return got;
+    }
+  catch (...)
+    {
+      if (took)
+        lock.unlock ();
+      throw;
+    }
+}
+
+vector<derived_probe*>
+derived_probe_builder::run_build_with_suffix(systemtap_session & sess,
+                                             probe * use,
+                                             probe_point * location,
+                                             literal_map_t const & parameters,
+                                             vector<probe_point::component *> const & suffix)
+{
+  bool took = false;
+  if (serialize_builds ())
+    {
+      lock.lock ();
+      took = true;
+    }
+  try
+    {
+      vector<derived_probe*> got
+        = build_with_suffix (sess, use, location, parameters, suffix);
+      if (took)
+        lock.unlock ();
+      return got;
+    }
+  catch (...)
+    {
+      if (took)
+        lock.unlock ();
+      throw;
+    }
+}
+
+vector<derived_probe*>
 derived_probe_builder::build_with_suffix(systemtap_session &,
                                          probe *,
                                          probe_point *,
                                          literal_map_t const &,
-                                         std::vector<derived_probe *> &,
                                          std::vector<probe_point::component *>
                                            const &) {
-  // XXX perhaps build the probe if suffix is empty?
-  // if (suffix.empty()) {
-  //   build (sess, use, location, parameters, finished_results);
-  //   return;
-  // }
   throw SEMANTIC_ERROR (_("invalid suffix for probe"));
 }
 
@@ -433,9 +522,9 @@ match_node::find_and_build (systemtap_session& s,
                             vector<derived_probe *>& results,
                             set<string>& builders)
 {
-  save_and_restore<unsigned> costly(& s.suppress_costly_diagnostics,
-                                    s.suppress_costly_diagnostics + (loc->optional || loc->sufficient ? 1 : 0));
-  
+  suppress_costly_diagnostics_guard costly
+    (s, loc->optional || loc->sufficient);
+
   assert (pos <= loc->components.size());
   if (pos == loc->components.size()) // matched all probe point components so far
     {
@@ -468,7 +557,9 @@ match_node::find_and_build (systemtap_session& s,
       for (unsigned k=0; k<ends.size(); k++) 
         {
           derived_probe_builder *b = ends[k];
-          b->build (s, p, loc, param_map, results);
+          vector<derived_probe*> got
+            = b->run_build (s, p, loc, param_map);
+          results.insert (results.end (), got.begin (), got.end ());
         }
 
       // Collect names of builders attempted for error reporting
@@ -563,8 +654,18 @@ match_node::find_and_build (systemtap_session& s,
     {
       match_key match (* loc->components[pos]);
 
-      // Call find_and_build for each possible match.  Ignore errors -
-      // unless we don't find any match.
+      // Collect concrete (non-glob) expansions first, then optionally
+      // derive them concurrently.  Workloads like `probe syscall.*`
+      // are a single user probe (derive_probes_parallel size==1) whose
+      // cost is this loop over hundreds of alias leaves — so this is
+      // the fan-out that must itself go parallel.
+      struct glob_work {
+        match_node* subnode;
+        probe_point* pp;
+        probe_point::component* comp;
+      };
+      vector<glob_work> work;
+
       unsigned int num_results = results.size();
       for (sub_map_iterator_t i = sub.begin(); i != sub.end(); i++)
         {
@@ -573,51 +674,118 @@ match_node::find_and_build (systemtap_session& s,
 
           assert_no_interrupts();
 
-	  if (match.globmatch(subkey))
-	    {
-	      if (s.verbose > 2)
-                clog << _F("wildcard '%s' matched '%s'",
-                           loc->components[pos]->functor.to_string().c_str(),
-                           subkey.name.to_string().c_str()) << endl;
-              
-	      // When we have a wildcard, we need to create a copy of
-	      // the probe point.  Then we'll create a copy of the
-	      // wildcard component, and substitute the non-wildcard
-	      // functor.
-	      probe_point *non_wildcard_pp = new probe_point(*loc);
-	      probe_point::component *non_wildcard_component
-		= new probe_point::component(*loc->components[pos]);
-	      non_wildcard_component->functor = subkey.name;
-	      non_wildcard_component->from_glob = true;
-	      non_wildcard_pp->components[pos] = non_wildcard_component;
+	  if (! match.globmatch(subkey))
+            continue;
 
-              // NB: probe conditions are not attached at the wildcard
-              // (component/functor) level, but at the overall
-              // probe_point level.
+          if (s.verbose > 2)
+            clog << _F("wildcard '%s' matched '%s'",
+                       loc->components[pos]->functor.to_string().c_str(),
+                       subkey.name.to_string().c_str()) << endl;
 
-	      unsigned int inner_results = results.size();
-
-	      // recurse (with the non-wildcard probe point)
-	      try
-	        {
-		  subnode->find_and_build (s, p, non_wildcard_pp, pos+1,
-					   results, builders);
-	        }
-	      catch (const semantic_error& e)
-	        {
-		  // Ignore semantic_errors while expanding wildcards.
-		  // If we get done and nothing was expanded, the code
-		  // following the loop will complain.
-		}
-
-	      if (results.size() == inner_results)
-		{
-		  // If this wildcard didn't match, cleanup.
-		  delete non_wildcard_pp;
-		  delete non_wildcard_component;
-	        }
-	    }
+	  // Copy the probe point and substitute the concrete functor.
+	  probe_point *non_wildcard_pp = new probe_point(*loc);
+	  probe_point::component *non_wildcard_component
+	    = new probe_point::component(*loc->components[pos]);
+	  non_wildcard_component->functor = subkey.name;
+	  non_wildcard_component->from_glob = true;
+	  non_wildcard_pp->components[pos] = non_wildcard_component;
+          // NB: probe conditions stay on the overall probe_point.
+          work.push_back ({subnode, non_wildcard_pp, non_wildcard_component});
 	}
+
+      auto run_one = [&](glob_work& w, vector<derived_probe*>& out,
+                         set<string>& builders_out) {
+        size_t before = out.size ();
+        try
+          {
+            w.subnode->find_and_build (s, p, w.pp, pos + 1, out, builders_out);
+          }
+        catch (const semantic_error& e)
+          {
+            // Ignore while expanding wildcards; empty out triggers
+            // the overall "no match" / suffix path below.
+          }
+        if (out.size () == before)
+          {
+            delete w.pp;
+            delete w.comp;
+          }
+      };
+
+      unsigned nthreads = stap_nthreads ();
+      // Nested pool (fanout / parallel derive worker): stay serial.
+      if (stap_parallel_nesting_depth () > 0)
+        nthreads = 1;
+      if (work.size () && nthreads > work.size ())
+        nthreads = work.size ();
+
+      if (s.verbose > 2 && work.size () > 1)
+        clog << _F("wildcard expand: %zu matches, %u threads\n",
+                   work.size (), nthreads ? nthreads : 1);
+
+      if (nthreads <= 1)
+        {
+          for (size_t i = 0; i < work.size (); i++)
+            {
+              set<string> b;
+              run_one (work[i], results, b);
+              builders.insert (b.begin (), b.end ());
+            }
+        }
+      else
+        {
+          bool timing = dwarf_timing_wanted (s);
+          if (timing)
+            {
+              stap_dwarf_timing.reset ();
+              stap_dwarf_timing.enabled.store (true);
+            }
+          boost::asio::thread_pool TP (nthreads);
+          vector<vector<derived_probe*> > per (work.size ());
+          vector<set<string> > builders_per (work.size ());
+          vector<exception_ptr> pending (work.size ());
+          atomic<bool> failed (false);
+
+          for (size_t i = 0; i < work.size (); i++)
+            {
+              boost::asio::post (TP, [i, &work, &per, &builders_per,
+                                      &pending, &failed, &run_one]() {
+                stap_parallel_nesting_guard nest;
+                try
+                  {
+                    assert_no_interrupts ();
+                    run_one (work[i], per[i], builders_per[i]);
+                  }
+                catch (...)
+                  {
+                    pending[i] = current_exception ();
+                    failed.store (true);
+                  }
+              });
+            }
+
+          TP.join ();
+          if (timing)
+            {
+              stap_dwarf_timing.enabled.store (false);
+              clog << "glob-parallel ";
+              stap_dwarf_timing.dump (clog);
+            }
+
+          if (failed.load ())
+            {
+              for (size_t i = 0; i < pending.size (); i++)
+                if (pending[i])
+                  rethrow_exception (pending[i]);
+            }
+
+          for (size_t i = 0; i < per.size (); i++)
+            {
+              results.insert (results.end (), per[i].begin (), per[i].end ());
+              builders.insert (builders_per[i].begin (),
+                               builders_per[i].end ());
+            }
+        }
 
       // Try suffix expansion only if no matches found:
       if (num_results == results.size())
@@ -727,7 +895,9 @@ match_node::try_suffix_expansion (systemtap_session& s,
           derived_probe_builder *b = ends[k];
           try
             {
-              b->build_with_suffix (s, p, loc, param_map, results, suffix);
+              vector<derived_probe*> got
+                = b->run_build_with_suffix (s, p, loc, param_map, suffix);
+              results.insert (results.end (), got.begin (), got.end ());
             }
           catch (const recursive_expansion_error &e)
             {
@@ -848,25 +1018,21 @@ alias_derived_probe::sole_location () const
 }
 
 
-void
+vector<derived_probe*>
 alias_expansion_builder::build(systemtap_session & sess,
 			       probe * use,
 			       probe_point * location,
-			       literal_map_t const & parameters,
-			       vector<derived_probe *> & finished_results)
+			       literal_map_t const & parameters)
 {
   vector<probe_point::component *> empty_suffix;
-  build_with_suffix (sess, use, location, parameters,
-                     finished_results, empty_suffix);
+  return build_with_suffix (sess, use, location, parameters, empty_suffix);
 }
 
-void
+vector<derived_probe*>
 alias_expansion_builder::build_with_suffix(systemtap_session & sess,
                                            probe * use,
                                            probe_point * location,
                                            literal_map_t const &,
-                                           vector<derived_probe *>
-                                             & finished_results,
                                            vector<probe_point::component *>
                                              const & suffix)
 {
@@ -913,14 +1079,20 @@ alias_expansion_builder::build_with_suffix(systemtap_session & sess,
   // there's concatenated code here and we only want one vardecl per
   // resulting variable.
 
+  // Deep-copy both sides: expand_target_vars / update visitors mutate
+  // the derived probe body in place.  Sharing use->body (or alias->body)
+  // across concurrent wildcard expansions races.
+  statement* use_body = deep_copy_visitor::deep_copy (use->body);
+  statement* alias_body = deep_copy_visitor::deep_copy (alias->body);
+
   if (alias->epilogue_style)
-    n->body = new block (use->body, alias->body);
+    n->body = new block (use_body, alias_body);
   else if (alias->body2)
-    n->body = new block (alias->body,
-                         use->body,
+    n->body = new block (alias_body,
+                         use_body,
                          deep_copy_visitor::deep_copy(alias->body2));
   else
-    n->body = new block (alias->body, use->body);
+    n->body = new block (alias_body, use_body);
 
   // We'll try to resolve any @probewrite predicates while we have
   // direct access to the probe body (use->body). Note that the
@@ -929,20 +1101,22 @@ alias_expansion_builder::build_with_suffix(systemtap_session & sess,
   probewrite_evaluator pw_eval(sess, use->body);
   pw_eval.replace(n->body);
 
-  unsigned old_num_results = finished_results.size();
   // If expanding for an alias suffix, be sure to pass on any errors
   // to the caller instead of printing them in derive_probes():
-  derive_probes (sess, n, finished_results, location->optional, !suffix.empty());
+  vector<derived_probe*> dps
+    = derive_probes (sess, n, location->optional, !suffix.empty());
 
   // Check whether we resolved something. If so, put the
   // whole library into the queue if not already there.
-  if (finished_results.size() > old_num_results)
+  if (! dps.empty ())
     {
       stapfile *f = alias->tok->location.file;
+      lock_guard<recursive_mutex> gl (sess.session_data_mutex);
       if (find (sess.files.begin(), sess.files.end(), f)
 	  == sess.files.end())
 	sess.files.push_back (f);
     }
+  return dps;
 }
 
 bool
@@ -972,17 +1146,19 @@ alias_expansion_builder::checkForRecursiveExpansion (probe *use)
 // ------------------------------------------------------------------------
 
 // The match-and-expand loop.
-void
+vector<derived_probe*>
 derive_probes (systemtap_session& s,
-               probe *p, vector<derived_probe*>& dps,
+               probe *p,
                bool optional,
                bool rethrow_errors)
 {
-  // We need a static to track whether the current probe is optional so that
-  // even if we recurse into derive_probes with optional = false, errors will
-  // still be ignored. The undo_parent_optional bool ensures we reset the
-  // static at the same level we had it set.
-  static bool parent_optional = false;
+  // Track whether the current probe is optional so that even if we
+  // recurse into derive_probes with optional = false, errors will
+  // still be ignored. thread_local so concurrent top-level
+  // derive_probes() calls do not clobber each other. The
+  // undo_parent_optional bool ensures we reset at the same nesting
+  // level we had it set.
+  static thread_local bool parent_optional = false;
   bool undo_parent_optional = false;
 
   if (optional && !parent_optional)
@@ -991,6 +1167,7 @@ derive_probes (systemtap_session& s,
       undo_parent_optional = true;
     }
 
+  vector<derived_probe*> dps;
   vector <semantic_error> optional_errs;
 
   for (unsigned i = 0; i < p->locations.size(); ++i)
@@ -1102,6 +1279,95 @@ derive_probes (systemtap_session& s,
     {
       parent_optional = false;
     }
+
+  return dps;
+}
+
+
+vector<vector<derived_probe*> >
+derive_probes_parallel (systemtap_session& s,
+                        const vector<probe*>& probes,
+                        bool optional,
+                        unsigned max_threads)
+{
+  vector<vector<derived_probe*> > results_per_probe (probes.size ());
+
+  if (probes.empty ())
+    return results_per_probe;
+
+  // Single probe: avoid thread-pool overhead.
+  if (probes.size () == 1)
+    {
+      results_per_probe[0] = derive_probes (s, probes[0], optional);
+      return results_per_probe;
+    }
+
+  // Nested call from a pool worker (fanout inside parallel derive, etc.):
+  // run serially.  Nested boost::asio::thread_pool join deadlocks.
+  if (stap_parallel_nesting_depth () > 0)
+    {
+      for (size_t i = 0; i < probes.size (); i++)
+        results_per_probe[i] = derive_probes (s, probes[i], optional);
+      return results_per_probe;
+    }
+
+  unsigned nthreads = stap_nthreads ();
+  if (max_threads > 0 && nthreads > max_threads)
+    nthreads = max_threads;
+  if (nthreads > probes.size ())
+    nthreads = probes.size ();
+  if (nthreads <= 1)
+    {
+      for (size_t i = 0; i < probes.size (); i++)
+        results_per_probe[i] = derive_probes (s, probes[i], optional);
+      return results_per_probe;
+    }
+
+  boost::asio::thread_pool TP (nthreads);
+  vector<exception_ptr> pending (probes.size ());
+  atomic<bool> failed (false);
+
+  for (size_t i = 0; i < probes.size (); i++)
+    {
+      boost::asio::post (TP, [i, &s, &probes, &results_per_probe, optional,
+                              &pending, &failed]() {
+        stap_parallel_nesting_guard nest;
+        try
+          {
+            assert_no_interrupts ();
+            results_per_probe[i] = derive_probes (s, probes[i], optional);
+          }
+        catch (const semantic_error& e)
+          {
+            // Keep-going: record and leave empty results for this probe
+            // so siblings can finish (make -k style).  Optional '?' path
+            // is unchanged inside derive_probes itself.
+            if (s.semantic_keep_going)
+              s.print_error (e);
+            else
+              {
+                pending[i] = current_exception ();
+                failed.store (true);
+              }
+          }
+        catch (...)
+          {
+            pending[i] = current_exception ();
+            failed.store (true);
+          }
+      });
+    }
+
+  TP.join ();
+
+  if (failed.load ())
+    {
+      for (size_t i = 0; i < pending.size (); i++)
+        if (pending[i])
+          rethrow_exception (pending[i]);
+    }
+
+  return results_per_probe;
 }
 
 
@@ -1661,8 +1927,7 @@ semantic_pass_conditions (systemtap_session & sess)
       if (!p)
         throw SEMANTIC_ERROR (_("can't create cond initializer probe"), tok);
 
-      vector<derived_probe*> dps;
-      derive_probes(sess, p, dps);
+      vector<derived_probe*> dps = derive_probes(sess, p);
 
       // there should only be one
       assert(dps.size() == 1);
@@ -1933,17 +2198,20 @@ semantic_pass_symbols (systemtap_session& s)
         s.embeds.push_back (dome->embeds[i]);
 
       // Pass 2: derive probes and resolve any further symbols in the
-      // derived results.
+      // derived results.  Derivation of probes within one file is
+      // concurrent; symbol resolution stays serial (shared tables).
 
-      for (unsigned i=0; i<dome->probes.size(); i++)
+      vector<probe*> batch = dome->probes;
+      auto t_derive0 = chrono::steady_clock::now ();
+      vector<vector<derived_probe*> > batch_results
+        = derive_probes_parallel (s, batch);
+      auto t_derive1 = chrono::steady_clock::now ();
+
+      size_t n_derived = 0;
+      for (unsigned i=0; i<batch.size(); i++)
         {
-          assert_no_interrupts();
-          probe* p = dome->probes [i];
-          vector<derived_probe*> dps;
-
-          // much magic happens here: probe alias expansion, wildcard
-          // matching, low-level derived_probe construction.
-          derive_probes (s, p, dps);
+          vector<derived_probe*>& dps = batch_results[i];
+          n_derived += dps.size ();
 
           for (unsigned j=0; j<dps.size(); j++)
             {
@@ -1983,6 +2251,18 @@ semantic_pass_symbols (systemtap_session& s)
                   s.print_error (e);
                 }
             }
+        }
+      auto t_symres1 = chrono::steady_clock::now ();
+      if (s.verbose > 2 && n_derived > 1)
+        {
+          double derive_ms =
+            chrono::duration<double, milli> (t_derive1 - t_derive0).count ();
+          double symres_ms =
+            chrono::duration<double, milli> (t_symres1 - t_derive1).count ();
+          clog << "elaborate timing: derive_wall=" << derive_ms
+               << "ms symres_wall=" << symres_ms
+               << "ms (" << n_derived << " derived from "
+               << batch.size () << " user probes)" << endl;
         }
 
       // Pass 3: process functions - incl. the synthetic ones, 
@@ -2198,8 +2478,7 @@ void add_global_var_display (systemtap_session& s)
       if (!p)
 	throw SEMANTIC_ERROR (_("can't create global var display"), l->tok);
 
-      vector<derived_probe*> dps;
-      derive_probes (s, p, dps);
+      vector<derived_probe*> dps = derive_probes (s, p);
       for (unsigned i = 0; i < dps.size(); i++)
 	{
 	  derived_probe* dp = dps[i];
@@ -2276,8 +2555,7 @@ static void gen_monitor_data(systemtap_session& s)
   if (!p)
     throw SEMANTIC_ERROR (_("can't create begin probe"), 0);
 
-  vector<derived_probe*> dps;
-  derive_probes (s, p, dps);
+  vector<derived_probe*> dps = derive_probes (s, p);
 
   derived_probe* dp = dps[0];
   s.probes.push_back (dp);
@@ -2423,8 +2701,7 @@ static void monitor_mode_read(systemtap_session& s)
   if (!p)
     throw SEMANTIC_ERROR (_("can't create procfs probe"), 0);
 
-  vector<derived_probe*> dps;
-  derive_probes (s, p, dps);
+  vector<derived_probe*> dps = derive_probes (s, p);
 
   derived_probe* dp = dps[0];
   s.probes.push_back (dp);
@@ -2540,8 +2817,7 @@ static void monitor_mode_write(systemtap_session& s)
   if (!p)
     throw SEMANTIC_ERROR (_("can't create procfs probe"), 0);
 
-  vector<derived_probe*> dps;
-  derive_probes (s, p, dps);
+  vector<derived_probe*> dps = derive_probes (s, p);
 
   derived_probe* dp = dps[0];
   s.probes.push_back (dp);
@@ -2564,8 +2840,7 @@ static void setup_timeout(systemtap_session& s)
   if (!p)
     throw SEMANTIC_ERROR (_("can't create timer probe"), 0);
 
-  vector<derived_probe*> dps;
-  derive_probes (s, p, dps);
+  vector<derived_probe*> dps = derive_probes (s, p);
 
   derived_probe* dp = dps[0];
   s.probes.push_back (dp);
@@ -2598,19 +2873,40 @@ semantic_pass (systemtap_session& s)
       s.register_library_aliases();
       register_standard_tapsets(s);
 
+      // --semantic-keep-going: like make -k within pass 2.  Keep
+      // running later elaboration stages so errors discovered in
+      // optimize/types/varuse (e.g. embedded-expression privilege
+      // checks) are still collected after an earlier stage failed.
+      // Each stage is try/catch-isolated so one stage throwing does
+      // not skip the rest.
+      const bool go = s.semantic_keep_going;
+      auto run_void = [&](auto&& fn) {
+        if (!(rc == 0 || go)) return;
+        try { fn(); }
+        catch (const semantic_error& e) { s.print_error (e); rc = rc ? rc : 1; }
+      };
+      auto run_int = [&](auto&& fn) {
+        if (!(rc == 0 || go)) return;
+        try {
+          int sub = fn();
+          if (sub) rc = sub;
+        }
+        catch (const semantic_error& e) { s.print_error (e); rc = rc ? rc : 1; }
+      };
+
       if (rc == 0) setup_timeout(s);
-      if (rc == 0) rc = semantic_pass_symbols (s);
-      if (rc == 0) monitor_mode_write (s);
-      if (rc == 0) rc = semantic_pass_conditions (s);
-      if (rc == 0) rc = semantic_pass_optimize1 (s); // includes const_fold and last ditch @defined() processing
-      if (rc == 0) rc = semantic_pass_types (s);
-      if (rc == 0) rc = gen_dfa_table(s);
-      if (rc == 0) add_global_var_display (s);
-      if (rc == 0) monitor_mode_read(s);
-      if (rc == 0) rc = semantic_pass_optimize2 (s);
-      if (rc == 0) rc = semantic_pass_vars (s);
-      if (rc == 0) rc = semantic_pass_stats (s);
-      if (rc == 0) embeddedcode_info_pass (s);
+      run_int ([&]{ return semantic_pass_symbols (s); });
+      run_void ([&]{ monitor_mode_write (s); });
+      run_int ([&]{ return semantic_pass_conditions (s); });
+      run_int ([&]{ return semantic_pass_optimize1 (s); });
+      run_int ([&]{ return semantic_pass_types (s); });
+      run_int ([&]{ return gen_dfa_table(s); });
+      run_void ([&]{ add_global_var_display (s); });
+      run_void ([&]{ monitor_mode_read(s); });
+      run_int ([&]{ return semantic_pass_optimize2 (s); });
+      run_int ([&]{ return semantic_pass_vars (s); });
+      run_int ([&]{ return semantic_pass_stats (s); });
+      run_void ([&]{ embeddedcode_info_pass (s); });
     }
   catch (const semantic_error& e)
     {
@@ -2619,7 +2915,15 @@ semantic_pass (systemtap_session& s)
     }
 
   // BZ1795159: don't count out "synthetic" probes any more, we have plenty
-  bool no_primary_probes = s.probes.size() == 0;
+  bool no_primary_probes = true;
+  for (unsigned i = 0; i < s.probes.size(); i++)
+    {
+      if (s.is_primary_probe(s.probes[i]))
+        {
+          no_primary_probes = false;
+          break;
+        }
+    }
 
   if (s.num_errors() == 0 && no_primary_probes && !s.dump_mode)
     {
@@ -2644,6 +2948,11 @@ semantic_pass (systemtap_session& s)
   delete s.type_res_info;
   s.type_res_info = NULL;
 
+  // After the pass that collected errors: emit the keep-going catalog.
+  // Later passes are already skipped via the if (rc == 0) chain above.
+  if (s.semantic_keep_going && !s.saved_semantic_errors.empty ())
+    s.dump_saved_semantic_errors ();
+
   return rc;
 }
 
@@ -2661,6 +2970,7 @@ symresolution_info::symresolution_info (systemtap_session& s, bool omniscient_un
   // made safe via our dtor usage
   #pragma GCC diagnostic ignored "-Wdangling-pointer"
   #endif
+  lock_guard<recursive_mutex> gl (s.session_data_mutex);
   saved_session_symbol_resolver = s.symbol_resolver;
   s.symbol_resolver = this; // save resolver for early PR25841 function resolution
   #pragma GCC diagnostic pop
@@ -2669,6 +2979,7 @@ symresolution_info::symresolution_info (systemtap_session& s, bool omniscient_un
 
 symresolution_info::~symresolution_info()
 {
+  lock_guard<recursive_mutex> gl (session.session_data_mutex);
   session.symbol_resolver = saved_session_symbol_resolver;
 }
 
@@ -3174,6 +3485,26 @@ symresolution_info::find_var (const string& name, int arity, const token* tok)
 }
 
 
+// Macro-expanded tokens record their invocation site in token::chain.
+// Guru privileges must follow that outermost caller (e.g. a tapset .stp
+// file), not the .stpm file where a library macro body was defined.
+static const token*
+outermost_macro_invocation (const token* tok)
+{
+  const token* t = tok;
+  while (t && t->chain)
+    t = t->chain;
+  return t;
+}
+
+static bool
+token_privileged_context (const token* tok)
+{
+  const token* t = outermost_macro_invocation (tok);
+  return t && t->location.file && t->location.file->privileged;
+}
+
+
 class functioncall_security_check: public traversing_visitor
 {
   systemtap_session& session;
@@ -3214,7 +3545,7 @@ public:
     }
 
   // Don't allow /* guru */ functions unless caller is privileged.
-  if (!call->synthetic && !call->tok->location.file->privileged &&
+  if (!call->synthetic && !token_privileged_context (call->tok) &&
       s->tagged_p ("/* guru */"))
     throw SEMANTIC_ERROR (_("function may not be used unless -g is specified"),
 			  call->tok);
@@ -3225,16 +3556,23 @@ public:
 vector<functiondecl*>
 symresolution_info::find_functions (functioncall *call, const string& name, unsigned arity, const token *tok)
 {
+  // Protect session.functions / session.files mutations against concurrent
+  // var_expanding early-resolution.  recursive: callers may already hold it.
+  lock_guard<recursive_mutex> gl (session.session_data_mutex);
+
   vector<functiondecl*> functions;
   functiondecl* last = 0; // used for error message
 
-  // the common path
-
-  // internal global functions bypassing the parser, such as __global_dwarf_tvar_[gs]et
-  if ((session.functions.find(name) != session.functions.end()) && startswith(name, "__private_"))
+  // Fully-qualified / synthetic keys already in the map (__clone_*,
+  // __private_*, __global_*__overload_N, __global_dwarf_tvar_*, …).
+  // Parser-facing names ("tid") are not keys; those use overload_count
+  // below.  Early var-expand rewrites functioncall::function to the
+  // clone key; if referents were lost, lookup used to miss the clone
+  // even though it was in session.functions (similar-list showed it).
+  auto it = session.functions.find(name);
+  if (it != session.functions.end() && it->second)
     {
-      functiondecl* fd = session.functions[name];
-      assert (fd->name == name);
+      functiondecl* fd = it->second;
       if (fd->formal_args.size() == arity)
         functions.push_back(fd);
       else
@@ -3242,7 +3580,7 @@ symresolution_info::find_functions (functioncall *call, const string& name, unsi
     }
 
   // functions scanned by the parser are overloaded
-  unsigned alternatives = session.overload_count[name];
+  unsigned alternatives = functions.empty() ? session.overload_count[name] : 0;
   for (unsigned alt = 0; alt < alternatives; alt++)
     {
       bool found = false; // multiple inclusion guard
@@ -5874,6 +6212,519 @@ void semantic_pass_opt7(systemtap_session& s)
     }
 }
 
+// Visitor to replace 'next' statements with error() calls using a sentinel value
+// This allows 'next' to exit one handler without affecting subsequent handlers
+struct next_statement_replacer: public update_visitor
+{
+  const token* tok;
+  systemtap_session& session;
+  static const char* NEXT_SENTINEL;
+
+  next_statement_replacer(const token* t, systemtap_session& s) : tok(t), session(s) {}
+
+  void visit_next_statement (next_statement* s)
+    {
+      // Replace 'next' with embedded C that sets CONTEXT->last_error to sentinel and jumps out
+      // This uses embedded_expr which can appear in probe bodies
+      block* b = new block();
+      b->tok = s->tok;
+
+      // Set c->last_error = "__SYSTEMTAP_NEXT__"
+      embedded_expr* set_error = new embedded_expr();
+      set_error->tok = s->tok;
+      set_error->code = string("/* unprivileged */ (c->last_error = \"")
+	+ NEXT_SENTINEL + "\") /* string */";
+
+      expr_statement* set_error_stmt = new expr_statement();
+      set_error_stmt->value = set_error;
+      set_error_stmt->tok = s->tok;
+
+      b->statements.push_back(set_error_stmt);
+
+      // Keep the next statement to jump out
+      next_statement* next_stmt = new next_statement(*s);
+      b->statements.push_back(next_stmt);
+
+      provide(b);
+    }
+};
+
+const char* next_statement_replacer::NEXT_SENTINEL = "__SYSTEMTAP_NEXT__";
+
+// Visitor to restore symbol referents after deep_copy and optionally rename locals
+// deep_copy_visitor sets symbol->referent to NULL, so we need to restore them
+struct symbol_referent_restorer: public update_visitor
+{
+  systemtap_session& session;
+  derived_probe* probe;
+  map<interned_string, vardecl*>* renaming_map; // optional: for renaming locals
+
+  symbol_referent_restorer(systemtap_session& s, derived_probe* p,
+                           map<interned_string, vardecl*>* rmap = NULL)
+    : session(s), probe(p), renaming_map(rmap) {}
+
+  void visit_symbol (symbol* e)
+    {
+      // Symbol referent was cleared by deep_copy, restore it
+      if (!e->referent)
+        {
+          // Check if it's a local variable that needs renaming
+          if (renaming_map && renaming_map->find(e->name) != renaming_map->end())
+            {
+              symbol* n = new symbol(*e);
+              n->referent = (*renaming_map)[e->name];
+              n->name = n->referent->name;
+              provide(n);
+              return;
+            }
+
+          // Look up the symbol in the current context to restore referent
+          // Check locals first (including renamed ones in probe->locals)
+          for (unsigned i = 0; i < probe->locals.size(); i++)
+            {
+              if (probe->locals[i]->name == e->name)
+                {
+                  symbol* n = new symbol(*e);
+                  n->referent = probe->locals[i];
+                  provide(n);
+                  return;
+                }
+            }
+
+          // Check globals
+          for (unsigned i = 0; i < session.globals.size(); i++)
+            {
+              if (session.globals[i]->name == e->name)
+                {
+                  symbol* n = new symbol(*e);
+                  n->referent = session.globals[i];
+                  provide(n);
+                  return;
+                }
+            }
+
+          // If we can't find it, it might be OK (e.g., not used in this particular path)
+          // Just leave it as-is and let later passes handle it
+        }
+
+      update_visitor::visit_symbol(e);
+    }
+
+  void visit_functioncall (functioncall* e)
+    {
+      // Restore function referents if they were cleared
+      if (e->referents.empty() && !e->function.empty())
+        {
+          functioncall* n = new functioncall(*e);
+
+          // Look up the function
+          if (session.functions.find(e->function) != session.functions.end())
+            n->referents.push_back(session.functions[e->function]);
+
+          // Visit args
+          for (unsigned i = 0; i < e->args.size(); i++)
+            replace(n->args[i]);
+
+          provide(n);
+          return;
+        }
+
+      update_visitor::visit_functioncall(e);
+    }
+};
+
+// Combine multiple probe handlers that share the same probe point
+// into a single handler with their bodies concatenated in sequence.
+// Each original probe body is wrapped in a try-catch block to isolate
+// errors and 'next' statements so they don't affect subsequent handlers.
+void semantic_pass_opt8(systemtap_session& s)
+{
+  // Skip this optimization for BPF runtime - it uses embedded C code
+  // for next/error handling which BPF cannot handle
+  if (s.runtime_mode == systemtap_session::bpf_runtime)
+    return;
+
+  // Map from probe point signature to list of probes with that point
+  // Use printsig_nonest() which includes the resolved binary-level address (PC)
+  // but not the derivation chain. This ensures we:
+  // - Combine probes at the same binary address (e.g., trace probes from aliases)
+  // - Don't combine probes at different binary addresses (e.g., different DWARF contexts)
+  // - Don't distinguish probes just because they came through different alias chains
+  map<string, vector<derived_probe*> > probe_point_map;
+
+  // Group probes by their probe point signature
+  for (vector<derived_probe*>::iterator it = s.probes.begin();
+       it != s.probes.end(); ++it)
+    {
+      derived_probe* p = *it;
+      // Skip synthetic probes — entry_handler / PR18115 need a distinct
+      // session_index.  Dwarf wildcard fanout collection probes must
+      // not set this flag, or duplicate PCs from alias globs would not
+      // combine (nthreads>1 vs serial).
+      if (p->synthetic)
+        continue;
+
+      probe_point* pp = p->sole_location();
+      // Skip probes with conditions - don't merge handlers with different conditions
+      if (pp && !pp->condition)
+        {
+          ostringstream pp_sig;
+          p->printsig_nonest(pp_sig);
+          string pp_str = pp_sig.str();
+          probe_point_map[pp_str].push_back(p);
+        }
+    }
+
+  // Track probes to remove
+  set<derived_probe*> probes_to_remove;
+
+  // Combine bodies for each probe point with multiple handlers
+  // Process in batches to keep compilation time reasonable
+  const size_t MAX_COMBINE = 32;
+
+  for (map<string, vector<derived_probe*> >::iterator it = probe_point_map.begin();
+       it != probe_point_map.end(); ++it)
+    {
+      vector<derived_probe*>& probes = it->second;
+
+      // Only combine if there are multiple probes with the same point
+      if (probes.size() <= 1)
+        continue;
+
+      // Process in batches of up to MAX_COMBINE probes
+      for (size_t batch_start = 0; batch_start < probes.size(); batch_start += MAX_COMBINE)
+        {
+          size_t batch_end = min(batch_start + MAX_COMBINE, probes.size());
+          size_t batch_size = batch_end - batch_start;
+
+          // Only combine if this batch has multiple probes
+          if (batch_size <= 1)
+            continue;
+
+          if (s.verbose > 1)
+            {
+              if (probes.size() > MAX_COMBINE)
+                clog << _F("Combining batch %zu-%zu of %zu probe handlers for probe point: %s",
+                           batch_start, batch_end - 1, probes.size(), it->first.c_str()) << endl;
+              else
+                clog << _F("Combining %zu probe handlers for probe point: %s",
+                           probes.size(), it->first.c_str()) << endl;
+            }
+
+          // Create a new block to hold all the combined statements for this batch
+          block* combined = new block();
+          combined->tok = probes[batch_start]->body ? probes[batch_start]->body->tok : probes[batch_start]->tok;
+
+          // Create an error tracking variable to re-throw errors at the end
+          vardecl* error_var = new vardecl();
+          error_var->name = "__combined_probe_error__";
+          error_var->tok = probes[batch_start]->tok;
+          error_var->type = pe_string;
+          error_var->set_arity(0, probes[batch_start]->tok);
+          error_var->synthetic = true;
+          probes[batch_start]->locals.push_back(error_var);
+
+          // Initialize error var to empty string
+          symbol* error_sym_init = new symbol();
+          error_sym_init->name = error_var->name;
+          error_sym_init->referent = error_var;
+          error_sym_init->tok = probes[batch_start]->tok;
+          error_sym_init->type = pe_string;
+
+          literal_string* empty_str = new literal_string("");
+          empty_str->tok = probes[batch_start]->tok;
+          empty_str->type = pe_string;
+
+          assignment* error_init = new assignment();
+          error_init->left = error_sym_init;
+          error_init->op = "=";
+          error_init->right = empty_str;
+          error_init->tok = probes[batch_start]->tok;
+          error_init->type = pe_string;
+
+          expr_statement* error_init_stmt = new expr_statement();
+          error_init_stmt->value = error_init;
+          error_init_stmt->tok = probes[batch_start]->tok;
+          combined->statements.push_back(error_init_stmt);
+
+          // Merge locals from all probes in this batch and add wrapped bodies
+          unsigned probe_index = 0;
+          for (size_t i = batch_start; i < batch_end; ++i, ++probe_index)
+            {
+              derived_probe* p = probes[i];
+              statement* body_to_use = p->body;
+
+              // For subsequent probes (index > 0), we need to:
+              // 1. Deep copy the body (to avoid sharing AST nodes)
+              // 2. Rename local variables to avoid conflicts (if any locals exist)
+              // 3. Restore symbol referents that were cleared by deep_copy
+              if (probe_index > 0 && body_to_use)
+                {
+                  // Always deep copy to avoid AST node sharing between handlers
+                  body_to_use = deep_copy_visitor::deep_copy(p->body);
+
+                  // Create renaming map and rename locals if this probe has any
+                  map<interned_string, vardecl*> renaming_map;
+
+                  if (!p->locals.empty())
+                    {
+                      for (vector<vardecl*>::iterator vit = p->locals.begin();
+                           vit != p->locals.end(); ++vit)
+                        {
+                          vardecl* old_var = *vit;
+
+                          // Skip renaming context variables that are initialized from outside the probe body
+                          // These are shared across all combined handlers and initialized by probe entry code:
+                          // - __tracepoint_arg_* (tracepoint context: $regs, $id, $ret, etc.)
+                          // - __lsm_arg_* (LSM context: $ctx)
+                          // - __xdp_arg_* (XDP context: $ctx)
+                          // - __nf_* (netfilter context: hooknum, skb, in, out, verdict)
+                          // - __mark_arg* (marker context)
+                          if (old_var->name.starts_with("__tracepoint_arg_") ||
+                              old_var->name.starts_with("__lsm_arg_") ||
+                              old_var->name.starts_with("__xdp_arg_") ||
+                              old_var->name.starts_with("__nf_") ||
+                              old_var->name.starts_with("__mark_arg"))
+                            {
+                              // Check if this variable is already in probes[batch_start]->locals
+                              bool already_exists = false;
+                              for (unsigned j = 0; j < probes[batch_start]->locals.size(); j++)
+                                {
+                                  if (probes[batch_start]->locals[j]->name == old_var->name)
+                                    {
+                                      already_exists = true;
+                                      break;
+                                    }
+                                }
+
+                              if (!already_exists)
+                                {
+                                  // Add the variable without renaming (shared across all handlers)
+                                  probes[batch_start]->locals.push_back(old_var);
+                                }
+
+                              // Don't add to renaming_map (no renaming for context variables)
+                              continue;
+                            }
+
+                          // Create a new vardecl with renamed name
+                          vardecl* new_var = new vardecl();
+                          new_var->name = old_var->name + "_" + lex_cast(probe_index);
+                          new_var->tok = old_var->tok;
+                          new_var->type = old_var->type;
+                          new_var->arity = old_var->arity;
+                          new_var->maxsize = old_var->maxsize;
+                          new_var->index_types = old_var->index_types;
+                          new_var->synthetic = old_var->synthetic;
+                          new_var->wrap = old_var->wrap;
+
+                          renaming_map[old_var->name] = new_var;
+                          probes[batch_start]->locals.push_back(new_var);
+                        }
+                    }
+
+                  // Restore symbol referents (cleared by deep_copy) and apply renaming
+                  // This is needed even if renaming_map is empty, to restore globals/functions
+                  symbol_referent_restorer restorer(s, probes[batch_start], renaming_map.empty() ? NULL : &renaming_map);
+                  body_to_use = restorer.require(body_to_use);
+                }
+
+              // Replace 'next' statements with embedded C that sets CONTEXT->last_error
+              if (body_to_use)
+                {
+                  next_statement_replacer nsr(body_to_use->tok, s);
+                  body_to_use = nsr.require(body_to_use);
+                }
+
+              if (body_to_use)
+                {
+                  // Reset syscall arg-decoding mode between combined
+                  // handlers.  Sibling bodies share one CONTEXT; if an
+                  // earlier handler called __set_syscall_pt_regs(),
+                  // pointer_arg()/int_arg() read syscall args from
+                  // pt_regs instead of the kprobe function args.  That
+                  // breaks demux probes that all attach to the same
+                  // entry (e.g. ia32 compat_sys_socketcall → socket,
+                  // bind, accept, …).  Match the per-handler prologue.
+                  if (probe_index > 0)
+                    {
+                      embedded_expr* clear_sregs = new embedded_expr();
+                      clear_sregs->tok = body_to_use->tok;
+                      // Must be privilege-tagged: stapusr rejects untagged
+                      // embedded_expr (see man stap, UNPRIVILEGED USERS).
+                      clear_sregs->code = "/* unprivileged */ (c->sregs = 0)";
+
+                      expr_statement* clear_stmt = new expr_statement();
+                      clear_stmt->value = clear_sregs;
+                      clear_stmt->tok = body_to_use->tok;
+                      combined->statements.push_back(clear_stmt);
+                    }
+
+                  // Wrap body in try-catch to isolate errors and 'next' statements
+
+                  // Create catch error variable
+                  symbol* error_sym_catch = new symbol();
+                  error_sym_catch->name = "__error__";
+                  error_sym_catch->tok = body_to_use->tok;
+                  error_sym_catch->type = pe_string;
+
+                  vardecl* catch_var = new vardecl();
+                  catch_var->name = "__error_" + lex_cast(probe_index) + "__";
+                  catch_var->tok = body_to_use->tok;
+                  catch_var->type = pe_string;
+                  catch_var->set_arity(0, body_to_use->tok);
+                  catch_var->synthetic = true;
+                  error_sym_catch->referent = catch_var;
+                  probes[batch_start]->locals.push_back(catch_var);
+
+                  // Build catch block: if (__error__ != NEXT_SENTINEL) save error
+                  symbol* error_check = new symbol();
+                  error_check->name = "__error__";
+                  error_check->referent = catch_var;
+                  error_check->tok = body_to_use->tok;
+                  error_check->type = pe_string;
+
+                  literal_string* sentinel = new literal_string(next_statement_replacer::NEXT_SENTINEL);
+                  sentinel->tok = body_to_use->tok;
+                  sentinel->type = pe_string;
+
+                  comparison* is_not_next = new comparison();
+                  is_not_next->left = error_check;
+                  is_not_next->op = "!=";
+                  is_not_next->right = sentinel;
+                  is_not_next->tok = body_to_use->tok;
+                  is_not_next->type = pe_long;
+
+                  // Assignment: __combined_probe_error__ = __error__
+                  symbol* error_save_lhs = new symbol();
+                  error_save_lhs->name = error_var->name;
+                  error_save_lhs->referent = error_var;
+                  error_save_lhs->tok = body_to_use->tok;
+                  error_save_lhs->type = pe_string;
+
+                  symbol* error_save_rhs = new symbol();
+                  error_save_rhs->name = "__error__";
+                  error_save_rhs->referent = catch_var;
+                  error_save_rhs->tok = body_to_use->tok;
+                  error_save_rhs->type = pe_string;
+
+                  assignment* save_error = new assignment();
+                  save_error->left = error_save_lhs;
+                  save_error->op = "=";
+                  save_error->right = error_save_rhs;
+                  save_error->tok = body_to_use->tok;
+                  save_error->type = pe_string;
+
+                  expr_statement* save_error_stmt = new expr_statement();
+                  save_error_stmt->value = save_error;
+                  save_error_stmt->tok = body_to_use->tok;
+
+                  // Wrap in if statement
+                  if_statement* catch_if = new if_statement();
+                  catch_if->condition = is_not_next;
+                  catch_if->thenblock = save_error_stmt;
+                  catch_if->elseblock = 0;
+                  catch_if->tok = body_to_use->tok;
+
+                  // Create try-catch block
+                  try_block* tb = new try_block();
+                  tb->try_block = body_to_use;
+                  tb->catch_block = catch_if;
+                  tb->catch_error_var = error_sym_catch;
+                  tb->tok = body_to_use->tok;
+
+                  combined->statements.push_back(tb);
+                }
+            }
+
+          // Re-throw error if one was caught
+          // Check if the error tracking variable is not empty
+          symbol* error_check_final = new symbol();
+          error_check_final->name = error_var->name;
+          error_check_final->referent = error_var;
+          error_check_final->tok = probes[batch_start]->tok;
+          error_check_final->type = pe_string;
+
+          literal_string* empty_check = new literal_string("");
+          empty_check->tok = probes[batch_start]->tok;
+          empty_check->type = pe_string;
+
+          comparison* has_error = new comparison();
+          has_error->left = error_check_final;
+          has_error->op = "!=";
+          has_error->right = empty_check;
+          has_error->tok = probes[batch_start]->tok;
+          has_error->type = pe_long;
+
+          // Re-throw by setting c->last_error using embedded C
+          block* rethrow_block = new block();
+          rethrow_block->tok = probes[batch_start]->tok;
+
+          // Set c->last_error to the saved error string
+          // In the generated C, local variables are accessed via l->l_<name>
+          embedded_expr* set_last_error = new embedded_expr();
+          set_last_error->tok = probes[batch_start]->tok;
+          set_last_error->code = string("/* unprivileged */ (c->last_error = l->l_")
+	    + string(error_var->name) + ") /* string */";
+
+          expr_statement* set_error_stmt = new expr_statement();
+          set_error_stmt->value = set_last_error;
+          set_error_stmt->tok = probes[batch_start]->tok;
+
+          rethrow_block->statements.push_back(set_error_stmt);
+
+          // Jump to out to exit the probe with the error
+          next_statement* goto_out = new next_statement();
+          goto_out->tok = probes[batch_start]->tok;
+
+          rethrow_block->statements.push_back(goto_out);
+
+          if_statement* error_if = new if_statement();
+          error_if->condition = has_error;
+          error_if->thenblock = rethrow_block;
+          error_if->elseblock = 0;
+          error_if->tok = probes[batch_start]->tok;
+
+          combined->statements.push_back(error_if);
+
+          probes[batch_start]->body = combined;
+
+          // Mark other probes in this batch for removal
+          for (size_t i = batch_start + 1; i < batch_end; ++i)
+            probes_to_remove.insert(probes[i]);
+
+        }
+    }
+
+  // Remove duplicate probes from s.probes
+  if (!probes_to_remove.empty())
+    {
+      if (s.verbose > 1)
+        clog << _F("Removing %zu duplicate probes", probes_to_remove.size()) << endl;
+
+      vector<derived_probe*> new_probes;
+      for (vector<derived_probe*>::iterator it = s.probes.begin();
+           it != s.probes.end(); ++it)
+        {
+          if (probes_to_remove.find(*it) == probes_to_remove.end())
+            {
+              new_probes.push_back(*it);
+              if (s.verbose > 2)
+                clog << _F("  Keeping probe at %s", lex_cast((*it)->tok->location).c_str()) << endl;
+            }
+          else
+            {
+              if (s.verbose > 2)
+                clog << _F("  Removing probe at %s", lex_cast((*it)->tok->location).c_str()) << endl;
+            }
+        }
+      s.probes = new_probes;
+
+      if (s.verbose > 1)
+        clog << _F("After combining: %zu probes remain", s.probes.size()) << endl;
+    }
+}
+
 static int
 semantic_pass_optimize1 (systemtap_session& s)
 {
@@ -5935,10 +6786,15 @@ semantic_pass_optimize1 (systemtap_session& s)
       iterations ++;
     }
 
+  // BEFORE joining groups, combine probes with identical probe points
+  // This must happen before join_group() so groups only see the combined probes
+  if (!s.unoptimized)
+    semantic_pass_opt8(s);
+
   // We will now remove probes that have empty handlers and join the remaining probes
   // with their groups. Do not elide probes when the unoptimization flag is set, or
   // synthetic probes (such as PR18115 probe-conditional synthetic-begin).
-  
+
   vector<derived_probe*> non_empty_probes;
 
   for (unsigned i = 0; i < s.probes.size(); i++)
@@ -6140,6 +6996,7 @@ struct initial_typeresolution_info : public typeresolution_info
   void visit_entry_op (entry_op*) {}
   void visit_perf_op (perf_op*) {}
   void visit_enum_op (enum_op*) {}
+  void visit_enumname_op (enumname_op*) {}
   void visit_cast_op (cast_op*) {}
 };
 
@@ -7032,6 +7889,23 @@ typeresolution_info::visit_enum_op (enum_op* e)
     invalid (e->tok, t);
 
   e->type = pe_long;
+}
+
+
+void
+typeresolution_info::visit_enumname_op (enumname_op* e)
+{
+  // An enumname_op should already have been expanded to a string
+  // literal or synthetic functioncall.
+  if (assert_resolvability)
+    session.print_error
+      (SEMANTIC_ERROR (_("@enumname requires a typed $variable or a type string "
+                         "argument; unresolved enumeration type"), e->tok));
+
+  t = pe_string;
+  e->type = pe_string;
+  num_still_unresolved++;
+  e->operand->visit (this);
 }
 
 

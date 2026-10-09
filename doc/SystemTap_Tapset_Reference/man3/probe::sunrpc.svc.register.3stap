@@ -2,12 +2,12 @@
 .\"     Title: probe::sunrpc.svc.register
 .\"    Author: 
 .\" Generator: DocBook XSL Stylesheets vsnapshot <http://docbook.sf.net/>
-.\"      Date: October 2025
+.\"      Date: September 2026
 .\"    Manual: Networking Tapset
-.\"    Source: SystemTap Tapset Reference
+.\"    Source: SystemTap Tapset Reference Version 5.6
 .\"  Language: English
 .\"
-.TH "PROBE::SUNRPC\&.SVC\" "3stap" "October 2025" "SystemTap Tapset Reference" "Networking Tapset"
+.TH "PROBE::SUNRPC\&.SVC\" "3stap" "September 2026" "SystemTap Tapset Reference Ver" "Networking Tapset"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -32,7 +32,7 @@ probe::sunrpc.svc.register \- Register an RPC service with the local portmapper
 .SH "SYNOPSIS"
 .sp
 .nf
-sunrpc\&.svc\&.register 
+probe sunrpc\&.svc\&.register {}
 .fi
 .SH "VALUES"
 .PP
@@ -41,9 +41,9 @@ sunrpc\&.svc\&.register
 the number of the program
 .RE
 .PP
-\fIprogname\fR
+\fIsv_name\fR
 .RS 4
-the name of the program
+the service name
 .RE
 .PP
 \fIprot\fR
@@ -51,14 +51,14 @@ the name of the program
 the IP protocol number
 .RE
 .PP
-\fIsv_name\fR
-.RS 4
-the service name
-.RE
-.PP
 \fIport\fR
 .RS 4
 the port number
+.RE
+.PP
+\fIprogname\fR
+.RS 4
+the name of the program
 .RE
 .SH "DESCRIPTION"
 .PP

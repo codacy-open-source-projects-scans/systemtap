@@ -15,6 +15,8 @@
 #include "stringtable.h"
 #include "dwflpp.h"
 
+#include <atomic>
+
 void check_process_probe_kernel_support(systemtap_session& s);
 
 void register_standard_tapsets(systemtap_session& sess);
@@ -50,7 +52,6 @@ struct utrace_derived_probe_group;
 struct itrace_derived_probe_group;
 struct netfilter_derived_probe_group;
 struct profile_derived_probe_group;
-struct mark_derived_probe_group;
 struct python_derived_probe_group;
 
 typedef std::vector<std::pair<derived_probe *, std::string> >
@@ -71,6 +72,12 @@ bool sort_for_bpf(systemtap_session& s,
                   sort_for_bpf_probe_arg_vector &v);
 bool sort_for_bpf(systemtap_session& s,
 		  tracepoint_derived_probe_group *t,
+                  sort_for_bpf_probe_arg_vector &v);
+bool sort_for_bpf(systemtap_session& s,
+		  lsm_derived_probe_group *l,
+                  sort_for_bpf_probe_arg_vector &v);
+bool sort_for_bpf(systemtap_session& s,
+		  xdp_derived_probe_group *x,
                   sort_for_bpf_probe_arg_vector &v);
 bool sort_for_bpf(systemtap_session& s,
 		  uprobe_derived_probe_group *u,
@@ -94,15 +101,11 @@ void warn_for_bpf(systemtap_session& s,
                   profile_derived_probe_group *dpg,
                   const std::string& kind);
 void warn_for_bpf(systemtap_session& s,
-                  mark_derived_probe_group *dpg,
-                  const std::string& kind);
-void warn_for_bpf(systemtap_session& s,
                   python_derived_probe_group *dpg,
                   const std::string& kind);
 
 void register_tapset_been(systemtap_session& sess);
 void register_tapset_itrace(systemtap_session& sess);
-void register_tapset_mark(systemtap_session& sess);
 void register_tapset_procfs(systemtap_session& sess);
 void register_tapset_timers(systemtap_session& sess);
 void register_tapset_netfilter(systemtap_session& sess);
@@ -133,6 +136,28 @@ public:
 // ------------------------------------------------------------------------
 // An update visitor that allows replacing assignments with a function call
 
+// Thread-local "current probe" for concurrent target-var / $$parms
+// expansion.  visit_functioncall prefers this over
+// symbol_resolver->current_probe so parallel expand workers do not race.
+probe* var_expand_tls_current_probe ();
+void var_expand_set_tls_current_probe (probe* p);
+
+struct var_expand_tls_probe_guard
+{
+  probe* prev;
+  explicit var_expand_tls_probe_guard (probe* p)
+    : prev (var_expand_tls_current_probe ())
+  {
+    var_expand_set_tls_current_probe (p);
+  }
+  ~var_expand_tls_probe_guard ()
+  {
+    var_expand_set_tls_current_probe (prev);
+  }
+  var_expand_tls_probe_guard (const var_expand_tls_probe_guard&) = delete;
+  var_expand_tls_probe_guard& operator= (const var_expand_tls_probe_guard&) = delete;
+};
+
 struct var_expanding_visitor: public update_visitor
 {
   var_expanding_visitor (systemtap_session& s);
@@ -141,6 +166,7 @@ struct var_expanding_visitor: public update_visitor
   void visit_post_crement (post_crement* e);
   void visit_delete_statement (delete_statement* s);
   void visit_defined_op (defined_op* e);
+  void visit_ternary_expression (ternary_expression* e);
 
   // PR25841: update through functions
   void visit_functioncall (functioncall* e);
@@ -149,7 +175,7 @@ protected:
   std::set<functiondecl*> early_resolution_in_progress;
   
   systemtap_session& sess;
-  static unsigned tick;
+  static std::atomic<unsigned> tick;
   std::stack<defined_op*> defined_ops;
   std::set<std::string> valid_ops;
   interned_string* op;

@@ -11,6 +11,8 @@
 #ifndef _COMPAT_UNISTD_H_
 #define _COMPAT_UNISTD_H_
 
+#include <linux/version.h>
+
 // Older kernels (like RHEL5) supported __NR_sendfile64. For newer
 // kernels, we'll just define __NR_sendfile64 in terms of
 // __NR_sendfile.
@@ -684,6 +686,15 @@
 #ifndef __NR_ia32_fgetxattr
 #define __NR_ia32_fgetxattr 231
 #endif
+// Generic syscall table (x86 32/64 share NRs from 424).  Alias ia32 to
+// the native token so old kernels whose dummy __NR_* is
+// (__NR_syscall_max+1) also elide the compat case.
+#ifndef __NR_ia32_file_getattr
+#define __NR_ia32_file_getattr __NR_file_getattr
+#endif
+#ifndef __NR_ia32_file_setattr
+#define __NR_ia32_file_setattr __NR_file_setattr
+#endif
 #ifndef __NR_ia32_finit_module
 #define __NR_ia32_finit_module 350
 #endif
@@ -922,6 +933,12 @@
 #endif
 #ifndef __NR_ia32_lsetxattr
 #define __NR_ia32_lsetxattr 227
+#endif
+#ifndef __NR_ia32_lsm_get_self_attr
+#define __NR_ia32_lsm_get_self_attr __NR_lsm_get_self_attr
+#endif
+#ifndef __NR_ia32_lsm_set_self_attr
+#define __NR_ia32_lsm_set_self_attr __NR_lsm_set_self_attr
 #endif
 #ifndef __NR_ia32_lstat
 #define __NR_ia32_lstat 107
@@ -1589,6 +1606,8 @@
 #define __NR_compat_fcntl64		__NR_ia32_fcntl64
 #define __NR_compat_fdatasync		__NR_ia32_fdatasync
 #define __NR_compat_fgetxattr		__NR_ia32_fgetxattr
+#define __NR_compat_file_getattr	__NR_ia32_file_getattr
+#define __NR_compat_file_setattr	__NR_ia32_file_setattr
 #define __NR_compat_finit_module	__NR_ia32_finit_module
 #define __NR_compat_flistxattr		__NR_ia32_flistxattr
 #define __NR_compat_flock		__NR_ia32_flock
@@ -1667,6 +1686,8 @@
 #define __NR_compat_lremovexattr	__NR_ia32_lremovexattr
 #define __NR_compat_lseek		__NR_ia32_lseek
 #define __NR_compat_lsetxattr		__NR_ia32_lsetxattr
+#define __NR_compat_lsm_get_self_attr	__NR_ia32_lsm_get_self_attr
+#define __NR_compat_lsm_set_self_attr	__NR_ia32_lsm_set_self_attr
 #define __NR_compat_lstat		__NR_ia32_lstat
 #define __NR_compat_lstat64		__NR_ia32_lstat64
 #define __NR_compat_madvise		__NR_ia32_madvise
@@ -1940,6 +1961,8 @@
 #define __NR_compat_fcntl64		__NR_fcntl64
 #define __NR_compat_fdatasync		__NR_fdatasync
 #define __NR_compat_fgetxattr		__NR_fgetxattr
+#define __NR_compat_file_getattr	__NR_file_getattr
+#define __NR_compat_file_setattr	__NR_file_setattr
 #define __NR_compat_finit_module	__NR_finit_module
 #define __NR_compat_flistxattr		__NR_flistxattr
 #define __NR_compat_flock		__NR_flock
@@ -2020,6 +2043,8 @@
 #define __NR_compat_lremovexattr	__NR_lremovexattr
 #define __NR_compat_lseek		__NR_lseek
 #define __NR_compat_lsetxattr		__NR_lsetxattr
+#define __NR_compat_lsm_get_self_attr	__NR_lsm_get_self_attr
+#define __NR_compat_lsm_set_self_attr	__NR_lsm_set_self_attr
 #define __NR_compat_lstat		__NR_lstat
 #define __NR_compat_lstat64		__NR_lstat64
 #define __NR_compat_madvise		__NR_madvise
@@ -2241,5 +2266,133 @@
 #endif
 
 #endif	/* __ia64__ */
+
+
+// glibc on 32-bit ABIs with 64-bit time_t calls the *_time64 variants
+// of the clock, poll and socket-time syscalls rather than the plain
+// ones.  Give the compat syscall dispatch switch names for those too,
+// so tasks in a compat ABI still get named probe records.  Prefer the
+// arch header's number; fall back to the asm-generic numbers shared by
+// the ia32, arm, ppc32 and s390 compat ABIs.
+
+#ifdef __NR_clock_gettime64
+#define __NR_compat_clock_gettime64	__NR_clock_gettime64
+#else
+#define __NR_compat_clock_gettime64	403
+#endif
+
+#ifdef __NR_clock_settime64
+#define __NR_compat_clock_settime64	__NR_clock_settime64
+#else
+#define __NR_compat_clock_settime64	404
+#endif
+
+#ifdef __NR_clock_adjtime64
+#define __NR_compat_clock_adjtime64	__NR_clock_adjtime64
+#else
+#define __NR_compat_clock_adjtime64	405
+#endif
+
+#ifdef __NR_clock_getres_time64
+#define __NR_compat_clock_getres_time64	__NR_clock_getres_time64
+#else
+#define __NR_compat_clock_getres_time64	406
+#endif
+
+#ifdef __NR_clock_nanosleep_time64
+#define __NR_compat_clock_nanosleep_time64 __NR_clock_nanosleep_time64
+#else
+#define __NR_compat_clock_nanosleep_time64 407
+#endif
+
+#ifdef __NR_timer_gettime64
+#define __NR_compat_timer_gettime64	__NR_timer_gettime64
+#else
+#define __NR_compat_timer_gettime64	408
+#endif
+
+#ifdef __NR_timer_settime64
+#define __NR_compat_timer_settime64	__NR_timer_settime64
+#else
+#define __NR_compat_timer_settime64	409
+#endif
+
+#ifdef __NR_timerfd_gettime64
+#define __NR_compat_timerfd_gettime64	__NR_timerfd_gettime64
+#else
+#define __NR_compat_timerfd_gettime64	410
+#endif
+
+#ifdef __NR_timerfd_settime64
+#define __NR_compat_timerfd_settime64	__NR_timerfd_settime64
+#else
+#define __NR_compat_timerfd_settime64	411
+#endif
+
+#ifdef __NR_utimensat_time64
+#define __NR_compat_utimensat_time64	__NR_utimensat_time64
+#else
+#define __NR_compat_utimensat_time64	412
+#endif
+
+#ifdef __NR_pselect6_time64
+#define __NR_compat_pselect6_time64	__NR_pselect6_time64
+#else
+#define __NR_compat_pselect6_time64	413
+#endif
+
+#ifdef __NR_ppoll_time64
+#define __NR_compat_ppoll_time64	__NR_ppoll_time64
+#else
+#define __NR_compat_ppoll_time64	414
+#endif
+
+#ifdef __NR_io_pgetevents_time64
+#define __NR_compat_io_pgetevents_time64 __NR_io_pgetevents_time64
+#else
+#define __NR_compat_io_pgetevents_time64 416
+#endif
+
+#ifdef __NR_recvmmsg_time64
+#define __NR_compat_recvmmsg_time64	__NR_recvmmsg_time64
+#else
+#define __NR_compat_recvmmsg_time64	417
+#endif
+
+#ifdef __NR_mq_timedsend_time64
+#define __NR_compat_mq_timedsend_time64	__NR_mq_timedsend_time64
+#else
+#define __NR_compat_mq_timedsend_time64	418
+#endif
+
+#ifdef __NR_mq_timedreceive_time64
+#define __NR_compat_mq_timedreceive_time64 __NR_mq_timedreceive_time64
+#else
+#define __NR_compat_mq_timedreceive_time64 419
+#endif
+
+#ifdef __NR_semtimedop_time64
+#define __NR_compat_semtimedop_time64	__NR_semtimedop_time64
+#else
+#define __NR_compat_semtimedop_time64	420
+#endif
+
+#ifdef __NR_rt_sigtimedwait_time64
+#define __NR_compat_rt_sigtimedwait_time64 __NR_rt_sigtimedwait_time64
+#else
+#define __NR_compat_rt_sigtimedwait_time64 421
+#endif
+
+#ifdef __NR_futex_time64
+#define __NR_compat_futex_time64	__NR_futex_time64
+#else
+#define __NR_compat_futex_time64	422
+#endif
+
+#ifdef __NR_sched_rr_get_interval_time64
+#define __NR_compat_sched_rr_get_interval_time64 __NR_sched_rr_get_interval_time64
+#else
+#define __NR_compat_sched_rr_get_interval_time64 423
+#endif
 
 #endif /* _COMPAT_UNISTD_H_ */

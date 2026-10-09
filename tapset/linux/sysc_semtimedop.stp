@@ -47,8 +47,8 @@
 	  set_pointer_arg(6, timeout_uaddr)
 %)
 
-probe syscall.semtimedop = dw_syscall.semtimedop !, nd_syscall.semtimedop ? {}
-probe syscall.semtimedop.return = dw_syscall.semtimedop.return !,
+probe syscall.semtimedop = tp_syscall.semtimedop !, dw_syscall.semtimedop !, nd_syscall.semtimedop ? {}
+probe syscall.semtimedop.return = tp_syscall.semtimedop.return !, dw_syscall.semtimedop.return !,
                                   nd_syscall.semtimedop.return ? {}
 
 # dw_semtimedop _____________________________________________________
@@ -108,10 +108,10 @@ probe nd2_syscall.semtimedop = kprobe.function(@arch_syscall_prefix "sys_semtime
         %( @_IS_SREG_KERNEL %? @_SYSCALL_SEMTIMEDOP_REGARGS_STORE %)
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.semtimedop = kernel.trace("sys_enter")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.semtimedop = tp_syscall("semtimedop") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_gate(@const("__NR_semtimedop"))
 	@_SYSCALL_SEMTIMEDOP_NAME
 	semid = int_arg(1)
@@ -142,13 +142,13 @@ probe nd2_syscall.semtimedop.return = kprobe.function(@arch_syscall_prefix "sys_
 	@SYSC_RETVALSTR(returnval())
 }
  
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.semtimedop.return = kernel.trace("sys_exit")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.semtimedop.return = tp_syscall("semtimedop").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_gate(@const("__NR_semtimedop"))
 	@_SYSCALL_SEMTIMEDOP_NAME
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }
 
 # compat_sys_semtimedop ________________________________________
@@ -157,9 +157,9 @@ probe tp_syscall.semtimedop.return = kernel.trace("sys_exit")
 #		unsigned nsops, const struct compat_timespec __user *timeout)
 #
 
-probe syscall.compat_sys_semtimedop = dw_syscall.compat_sys_semtimedop !,
+probe syscall.compat_sys_semtimedop = tp_syscall.compat_sys_semtimedop !, dw_syscall.compat_sys_semtimedop !,
 	                              nd_syscall.compat_sys_semtimedop ? {}
-probe syscall.compat_sys_semtimedop.return = dw_syscall.compat_sys_semtimedop.return !,
+probe syscall.compat_sys_semtimedop.return = tp_syscall.compat_sys_semtimedop.return !, dw_syscall.compat_sys_semtimedop.return !,
 	                                     nd_syscall.compat_sys_semtimedop.return ? {}
 
 # dw_compat_sys_semtimedop _____________________________________________________
@@ -168,7 +168,13 @@ probe dw_syscall.compat_sys_semtimedop = __syscall.compat_semtimedop ?,
 	__syscall.compat_ipc.semtimedop ?
 {
 	@_SYSCALL_SEMTIMEDOP_NAME
-	timeout_str = _struct_compat_timespec_u(timeout_uaddr, 1)
+	%( CONFIG_COMPAT_32BIT_TIME == "y" %?
+		timeout_str = _struct_compat_timespec_u(timeout_uaddr, 1)
+		try { if (_stp_syscall_nr() == @const("__NR_compat_semtimedop_time64")) timeout_str = _struct_timespec_u(timeout_uaddr, 1) } catch { }
+	%:
+		timeout_str = _struct_timespec_u(timeout_uaddr, 1)
+	%)
+
 	@_SYSCALL_SEMTIMEDOP_ARGSTR
 }
 probe __syscall.compat_semtimedop =
@@ -218,10 +224,16 @@ probe nd1_syscall.compat_sys_semtimedop = __nd1_syscall.compat_semtimedop ?,
 	__nd1_syscall.compat_ipc.semtimedop ?
 {
 	@_SYSCALL_SEMTIMEDOP_NAME
-	timeout_str = _struct_compat_timespec_u(timeout_uaddr, 1)
+	%( CONFIG_COMPAT_32BIT_TIME == "y" %?
+		timeout_str = _struct_compat_timespec_u(timeout_uaddr, 1)
+		try { if (_stp_syscall_nr() == @const("__NR_compat_semtimedop_time64")) timeout_str = _struct_timespec_u(timeout_uaddr, 1) } catch { }
+	%:
+		timeout_str = _struct_timespec_u(timeout_uaddr, 1)
+	%)
+
 	@_SYSCALL_SEMTIMEDOP_ARGSTR
 }
-probe __nd1_syscall.compat_semtimedop =
+probe __nd1_syscall.compat_semtimedop = 
 	kprobe.function("compat_sys_semtimedop") ?
 {
 	@__compat_syscall_gate_negative(@const("__NR_compat_ipc"))
@@ -230,7 +242,7 @@ probe __nd1_syscall.compat_semtimedop =
 	nsops = uint_arg(3)
 	timeout_uaddr = pointer_arg(4)
 }
-probe __nd1_syscall.compat_ipc.semtimedop =
+probe __nd1_syscall.compat_ipc.semtimedop = 
 	__nd1_syscall.compat_ipc.semtimedop.sys_ipc ?,
 	__nd1_syscall.compat_ipc.semtimedop.sys32_ipc ?
 {
@@ -239,12 +251,12 @@ probe __nd1_syscall.compat_ipc.semtimedop =
         sops_uaddr = pointer_arg(5)
         nsops = uint_arg(3)
 }
-probe __nd1_syscall.compat_ipc.semtimedop.sys_ipc =
+probe __nd1_syscall.compat_ipc.semtimedop.sys_ipc = 
 	kprobe.function("compat_sys_ipc") ?
 {
 	timeout_uaddr = pointer_arg(6)
 }
-probe __nd1_syscall.compat_ipc.semtimedop.sys32_ipc =
+probe __nd1_syscall.compat_ipc.semtimedop.sys32_ipc = 
         kprobe.function("sys32_ipc") ?
 {
 %( arch == "s390" %?
@@ -265,25 +277,37 @@ probe nd2_syscall.compat_sys_semtimedop =
         sops_uaddr = pointer_arg(5)
         nsops = uint_arg(3)
 	timeout_uaddr = pointer_arg(6)
-	timeout_str = _struct_compat_timespec_u(timeout_uaddr, 1)
+	%( CONFIG_COMPAT_32BIT_TIME == "y" %?
+		timeout_str = _struct_compat_timespec_u(timeout_uaddr, 1)
+		try { if (_stp_syscall_nr() == @const("__NR_compat_semtimedop_time64")) timeout_str = _struct_timespec_u(timeout_uaddr, 1) } catch { }
+	%:
+		timeout_str = _struct_timespec_u(timeout_uaddr, 1)
+	%)
+
 	@_SYSCALL_SEMTIMEDOP_ARGSTR
 },
 {
         %( @_IS_SREG_KERNEL %? @_SYSCALL_COMPAT_SEMTIMEDOP_REGARGS_STORE %)
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.compat_sys_semtimedop = kernel.trace("sys_enter")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.compat_sys_semtimedop = tp_syscall("~compat_ipc,~compat_semtimedop_time64") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
-	@__compat_syscall_gate(@const("__NR_compat_ipc"))
+	@__set_syscall_pt_regs
+	@__compat_syscall_gate2(@const("__NR_compat_ipc"), @const("__NR_compat_semtimedop_time64"))
 	if (int_arg(1) != @const("SEMTIMEDOP")) next;
 	@_SYSCALL_SEMTIMEDOP_NAME
 	semid = int_arg(2)
         sops_uaddr = pointer_arg(5)
         nsops = uint_arg(3)
 	timeout_uaddr = pointer_arg(6)
-	timeout_str = _struct_compat_timespec_u(timeout_uaddr, 1)
+	%( CONFIG_COMPAT_32BIT_TIME == "y" %?
+		timeout_str = _struct_compat_timespec_u(timeout_uaddr, 1)
+		try { if (_stp_syscall_nr() == @const("__NR_compat_semtimedop_time64")) timeout_str = _struct_timespec_u(timeout_uaddr, 1) } catch { }
+	%:
+		timeout_str = _struct_timespec_u(timeout_uaddr, 1)
+	%)
+
 	@_SYSCALL_SEMTIMEDOP_ARGSTR
 },
 {
@@ -293,19 +317,19 @@ probe tp_syscall.compat_sys_semtimedop = kernel.trace("sys_enter")
 probe nd_syscall.compat_sys_semtimedop.return = nd1_syscall.compat_sys_semtimedop.return!, nd2_syscall.compat_sys_semtimedop.return!, tp_syscall.compat_sys_semtimedop.return
   { }
 
-probe nd1_syscall.compat_sys_semtimedop.return =
+probe nd1_syscall.compat_sys_semtimedop.return = 
 	__nd1_syscall.compat_sys_semtimedop.return ?,
 	__nd1_syscall.compat_ipc.semtimedop.return ?
 {
 	@_SYSCALL_SEMTIMEDOP_NAME
 	@SYSC_RETVALSTR(returnval())
 }
-probe __nd1_syscall.compat_sys_semtimedop.return =
+probe __nd1_syscall.compat_sys_semtimedop.return = 
 	kprobe.function("compat_sys_semtimedop").return ?
 {
 	@__compat_syscall_gate_negative(@const("__NR_compat_ipc"))
 }
-probe __nd1_syscall.compat_ipc.semtimedop.return =
+probe __nd1_syscall.compat_ipc.semtimedop.return = 
 	kprobe.function("compat_sys_ipc").return ?,
 	kprobe.function("sys32_ipc").return ?
 {
@@ -322,12 +346,12 @@ probe nd2_syscall.compat_sys_semtimedop.return =
 	@SYSC_RETVALSTR(returnval())
 }
  
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.compat_sys_semtimedop.return = kernel.trace("sys_exit")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.compat_sys_semtimedop.return = tp_syscall("~compat_ipc,~compat_semtimedop_time64").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
-	@__compat_syscall_gate(@const("__NR_compat_ipc"))
+	@__set_syscall_pt_regs
+	@__compat_syscall_gate2(@const("__NR_compat_ipc"), @const("__NR_compat_semtimedop_time64"))
 	if (int_arg(1) != @const("SEMTIMEDOP")) next;
 	@_SYSCALL_SEMTIMEDOP_NAME
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }

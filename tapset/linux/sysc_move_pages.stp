@@ -55,8 +55,8 @@
 	  set_int_arg(6, flags)
 %)
 
-probe syscall.move_pages = dw_syscall.move_pages !, nd_syscall.move_pages ? {}
-probe syscall.move_pages.return = dw_syscall.move_pages.return !, nd_syscall.move_pages.return ? {}
+probe syscall.move_pages = tp_syscall.move_pages !, dw_syscall.move_pages !, nd_syscall.move_pages ? {}
+probe syscall.move_pages.return = tp_syscall.move_pages.return !, dw_syscall.move_pages.return !, nd_syscall.move_pages.return ? {}
 
 # dw_move_pages _____________________________________________________
 
@@ -101,7 +101,7 @@ probe nd1_syscall.move_pages = __nd1_syscall.move_pages ?,
 	@_SYSCALL_MOVE_PAGES_REGARGS
 	@_SYSCALL_MOVE_PAGES_ARGSTR
 }
-probe __nd1_syscall.move_pages = kprobe.function("sys_move_pages")
+probe __nd1_syscall.move_pages = kprobe.function("sys_move_pages") ?
 {
 	@__syscall_gate(@const("__NR_move_pages"))
 }
@@ -120,10 +120,10 @@ probe nd2_syscall.move_pages =
         %( @_IS_SREG_KERNEL %? @_SYSCALL_MOVE_PAGES_REGARGS_STORE %)
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.move_pages = kernel.trace("sys_enter")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.move_pages = tp_syscall("move_pages,~compat_move_pages") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_compat_gate(@const("__NR_move_pages"), @const("__NR_compat_move_pages"))
 	@_SYSCALL_MOVE_PAGES_NAME
 	@_SYSCALL_MOVE_PAGES_REGARGS
@@ -142,7 +142,7 @@ probe nd1_syscall.move_pages.return = __nd1_syscall.move_pages.return ?,
 	@_SYSCALL_MOVE_PAGES_NAME
 	@SYSC_RETVALSTR(returnval())
 }
-probe __nd1_syscall.move_pages.return = kprobe.function("sys_move_pages").return
+probe __nd1_syscall.move_pages.return = kprobe.function("sys_move_pages").return ?
 {
 	@__syscall_gate(@const("__NR_move_pages"))
 }
@@ -156,11 +156,11 @@ probe nd2_syscall.move_pages.return =
 	@SYSC_RETVALSTR(returnval())
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.move_pages.return = kernel.trace("sys_exit")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.move_pages.return = tp_syscall("move_pages,~compat_move_pages").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_compat_gate(@const("__NR_move_pages"), @const("__NR_compat_move_pages"))
 	@_SYSCALL_MOVE_PAGES_NAME
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }

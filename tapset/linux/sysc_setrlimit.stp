@@ -35,8 +35,8 @@
 	  set_pointer_arg(2, rlim_uaddr)
 %)
 
-probe syscall.setrlimit = dw_syscall.setrlimit !, nd_syscall.setrlimit ? {}
-probe syscall.setrlimit.return = dw_syscall.setrlimit.return !,
+probe syscall.setrlimit = tp_syscall.setrlimit !, dw_syscall.setrlimit !, nd_syscall.setrlimit ? {}
+probe syscall.setrlimit.return = tp_syscall.setrlimit.return !, dw_syscall.setrlimit.return !,
                                  nd_syscall.setrlimit.return ? {}
 
 # dw_setrlimit _____________________________________________________
@@ -79,7 +79,7 @@ probe nd1_syscall.setrlimit = __nd1_syscall.setrlimit ?,
 	@_SYSCALL_SETRLIMIT_REGARGS
 	@_SYSCALL_SETRLIMIT_ARGSTR
 }
-probe __nd1_syscall.setrlimit = kprobe.function("sys_setrlimit")
+probe __nd1_syscall.setrlimit = kprobe.function("sys_setrlimit") ?
 {
 	@__syscall_gate(@const("__NR_setrlimit"))
 }
@@ -98,10 +98,10 @@ probe nd2_syscall.setrlimit =
         %( @_IS_SREG_KERNEL %? @_SYSCALL_SETRLIMIT_REGARGS_STORE %)
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.setrlimit = kernel.trace("sys_enter")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.setrlimit = tp_syscall("setrlimit,~compat_setrlimit") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_compat_gate(@const("__NR_setrlimit"), @const("__NR_compat_setrlimit"))
 	@_SYSCALL_SETRLIMIT_NAME
 	@_SYSCALL_SETRLIMIT_REGARGS
@@ -120,7 +120,7 @@ probe nd1_syscall.setrlimit.return = __nd1_syscall.setrlimit.return ?,
 	@_SYSCALL_SETRLIMIT_NAME
 	@SYSC_RETVALSTR(returnval())
 }
-probe __nd1_syscall.setrlimit.return = kprobe.function("sys_setrlimit").return
+probe __nd1_syscall.setrlimit.return = kprobe.function("sys_setrlimit").return ?
 {
 	@__syscall_gate(@const("__NR_setrlimit"))
 }
@@ -134,11 +134,11 @@ probe nd2_syscall.setrlimit.return =
 	@SYSC_RETVALSTR(returnval())
 }
  
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.setrlimit.return = kernel.trace("sys_exit")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.setrlimit.return = tp_syscall("setrlimit,~compat_setrlimit").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_compat_gate(@const("__NR_setrlimit"), @const("__NR_compat_setrlimit"))
 	@_SYSCALL_SETRLIMIT_NAME
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }

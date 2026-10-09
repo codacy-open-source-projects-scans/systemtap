@@ -65,8 +65,7 @@ struct semantic_error: public std::runtime_error
       runtime_error(other), tok1(other.tok1), tok2(other.tok2),
       errsrc(other.errsrc), details(other.details), chain (0)
     {
-      if (other.chain)
-        set_chain(*other.chain);
+      chain = clone_chain (other.chain);
     }
 
   std::string errsrc_chain(void) const
@@ -78,7 +77,7 @@ struct semantic_error: public std::runtime_error
     {
       if (chain)
         delete chain;
-      chain = new semantic_error(new_chain);
+      chain = clone_chain (&new_chain);
       return *this;
     }
 
@@ -89,6 +88,28 @@ struct semantic_error: public std::runtime_error
 
 private:
   const semantic_error* chain;
+
+  static semantic_error* clone_chain (const semantic_error* src)
+    {
+      if (!src)
+        return 0;
+      semantic_error* head = 0;
+      semantic_error* prev = 0;
+      for (const semantic_error* cur = src; cur; cur = cur->chain)
+        {
+          semantic_error* node = new semantic_error (cur->errsrc,
+                                                     std::string (cur->what ()),
+                                                     cur->tok1, cur->tok2);
+          node->details = cur->details;
+          node->chain = 0;
+          if (prev)
+            prev->chain = node;
+          else
+            head = node;
+          prev = node;
+        }
+      return head;
+    }
 };
 
 // ------------------------------------------------------------------------
@@ -463,6 +484,19 @@ struct perf_op: public expression
 struct enum_op: public expression
 {
   literal_string *operand;
+  void print (std::ostream& o) const;
+  void visit (visitor* u);
+};
+
+
+// Reverse of @enum: map an integral rvalue to an enumerator name string.
+// Type comes from a typed $variable operand, or from optional type/module
+// string arguments (same shape as @cast).
+struct enumname_op: public expression
+{
+  expression *operand;
+  interned_string type_name, module;
+  enumname_op (): operand(0) {}
   void print (std::ostream& o) const;
   void visit (visitor* u);
 };
@@ -908,9 +942,14 @@ struct probe_point
     interned_string functor;
     literal* arg; // optional
     bool from_glob;
+    // Elaborator-synthesized cookies (e.g. .pc/.die for dwarf fanout).
+    // Still matched/derived, but omitted from print() so stap -l / pp() /
+    // script_location stay pasteable as function("name@file:line").
+    bool hidden;
     component ();
     const token* tok; // points to component's functor
-    component(interned_string f, literal *a=NULL, bool from_glob=false);
+    component(interned_string f, literal *a=NULL, bool from_glob=false,
+              bool hidden=false);
   };
   std::vector<component*> components;
   bool optional;
@@ -918,11 +957,13 @@ struct probe_point
   bool well_formed; // used in derived_probe::script_location()
   expression* condition;
   std::string auto_path;
-  void print (std::ostream& o, bool print_extras=true) const;
+  // print_hidden: include components with hidden==true (fanout cookies).
+  void print (std::ostream& o, bool print_extras=true,
+              bool print_hidden=false) const;
   probe_point ();
   probe_point(const probe_point& pp);
   probe_point(std::vector<component*> const & comps);
-  std::string str(bool print_extras=true) const;
+  std::string str(bool print_extras=true, bool print_hidden=false) const;
   bool from_globby_comp(const std::string& comp);
 };
 
@@ -1027,6 +1068,7 @@ struct visitor
   virtual void visit_entry_op (entry_op* e) = 0;
   virtual void visit_perf_op (perf_op* e) = 0;
   virtual void visit_enum_op (enum_op* e) = 0;
+  virtual void visit_enumname_op (enumname_op* e) = 0;
 };
 
 
@@ -1082,6 +1124,7 @@ struct nop_visitor: public visitor
   virtual void visit_entry_op (entry_op*) {};
   virtual void visit_perf_op (perf_op*) {};
   virtual void visit_enum_op (enum_op*) {};
+  virtual void visit_enumname_op (enumname_op*) {};
 };
 
 
@@ -1137,6 +1180,7 @@ struct traversing_visitor: public visitor
   void visit_entry_op (entry_op* e);
   void visit_perf_op (perf_op* e);
   void visit_enum_op (enum_op* e);
+  void visit_enumname_op (enumname_op* e);
 };
 
 
@@ -1178,6 +1222,7 @@ struct expression_visitor: public traversing_visitor
   void visit_entry_op (entry_op* e);
   void visit_perf_op (perf_op* e);
   void visit_enum_op (enum_op* e);
+  void visit_enumname_op (enumname_op* e);
 };
 
 
@@ -1241,6 +1286,7 @@ struct varuse_collecting_visitor: public functioncall_traversing_visitor
   void visit_entry_op (entry_op* e);
   void visit_perf_op (perf_op* e);
   void visit_enum_op (enum_op* e);
+  void visit_enumname_op (enumname_op* e);
   bool side_effect_free ();
   bool side_effect_free_wrt (const std::set<vardecl*>& vars);
 };
@@ -1266,6 +1312,7 @@ symuse_collecting_visitor: public varuse_collecting_visitor
   void visit_symbol(symbol* e);
   void visit_probewrite_op(probewrite_op* e);
   void visit_enum_op (enum_op* e);
+  void visit_enumname_op (enumname_op* e);
 };
 
 
@@ -1326,6 +1373,7 @@ struct throwing_visitor: public visitor
   void visit_entry_op (entry_op* e);
   void visit_perf_op (perf_op* e);
   void visit_enum_op (enum_op* e);
+  void visit_enumname_op (enumname_op* e);
 };
 
 // A visitor similar to a traversing_visitor, but with the ability to rewrite
@@ -1449,6 +1497,7 @@ struct update_visitor: public visitor
   virtual void visit_entry_op (entry_op* e);
   virtual void visit_perf_op (perf_op* e);
   virtual void visit_enum_op (enum_op* e);
+  virtual void visit_enumname_op (enumname_op* e);
 
 private:
   std::stack<visitable *> values;
@@ -1518,6 +1567,7 @@ struct deep_copy_visitor: public update_visitor
   virtual void visit_entry_op (entry_op* e);
   virtual void visit_perf_op (perf_op* e);
   virtual void visit_enum_op (enum_op* e);
+  virtual void visit_enumname_op (enumname_op* e);
 };
 
 struct embedded_tags_visitor: public traversing_visitor
@@ -1528,6 +1578,7 @@ struct embedded_tags_visitor: public traversing_visitor
   void visit_embeddedcode (embeddedcode *s);
   void visit_embedded_expr (embedded_expr *e);
   void visit_enum_op (enum_op* e);
+  void visit_enumname_op (enumname_op* e);
 };
 
 #endif // STAPTREE_H

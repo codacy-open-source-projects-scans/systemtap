@@ -11,6 +11,15 @@
 #ifndef _LINUX_RUNTIME_H_
 #define _LINUX_RUNTIME_H_
 
+#ifndef _STRINGIFY
+#define __STRINGIFY(x) #x
+#define _STRINGIFY(x) __STRINGIFY(x)
+#endif
+
+static inline void __stp_exectrace(const char* msg) {
+    printk(KERN_INFO "%s\n", msg);
+}
+
 #include <linux/module.h>
 #include <linux/ctype.h>
 #include <linux/kernel.h>
@@ -130,6 +139,7 @@ typedef typeof(&udelay_simple) udelay_simple_fn;
 
 static void _stp_dbug (const char *func, int line, const char *fmt, ...) __attribute__ ((format (printf, 3, 4)));
 static void _stp_error (const char *fmt, ...) __attribute__ ((format (printf, 1, 2)));
+static void _stp_softerror_handler (struct context *c);
 static void _stp_warn (const char *fmt, ...) __attribute__ ((format (printf, 1, 2)));
 
 static void _stp_exit(void);
@@ -161,6 +171,12 @@ static void _stp_exit(void);
 #endif
 
 /* unprivileged user support */
+
+/* Kernel commit 15c1f17979 ("cred: delete task_euid()") dropped the
+ * task_euid() helper; recreate it from the still-present task_cred_xxx(). */
+#if !defined(task_euid) && defined(task_cred_xxx)
+#define task_euid(task)		(task_cred_xxx((task), euid))
+#endif
 
 #ifdef STAPCONF_TASK_UID
 #define STP_CURRENT_EUID (current->euid)
@@ -285,6 +301,19 @@ static void *kallsyms___lock_task_sighand;
 #endif
 #if !defined(STAPCONF_GET_MM_EXE_FILE_EXPORTED)
 static void *kallsyms_get_mm_exe_file;
+#endif
+
+/* Kernel 7.2+ removed rdmsrl/wrmsrl compatibility aliases. */
+#if defined(CONFIG_X86) || defined(__i386__) || defined(__x86_64__)
+#include <asm/msr.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7,2,0)
+#ifndef rdmsrl
+#define rdmsrl(msr, val) rdmsrq((msr), (val))
+#endif
+#ifndef wrmsrl
+#define wrmsrl(msr, val) wrmsrq((msr), (val))
+#endif
+#endif
 #endif
 
 /* PR30777: Need a mechanism to temporarily turn off Intel IBT */

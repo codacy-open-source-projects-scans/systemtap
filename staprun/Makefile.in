@@ -95,13 +95,14 @@ host_triplet = @host@
 target_triplet = @target@
 @Werror_TRUE@am__append_1 = -Werror
 @Werror_TRUE@am__append_2 = -Werror
+@enable_glibcxx_debug_TRUE@am__append_3 = -D_GLIBCXX_DEBUG -D_GLIBCXX_DEBUG_PEDANTIC
 bin_PROGRAMS = staprun$(EXEEXT) stap-merge$(EXEEXT) stapsh$(EXEEXT)
 pkglibexec_PROGRAMS = stapio$(EXEEXT)
-@HAVE_NSS_TRUE@am__append_3 = modverify.c ../nsscommon.cxx
-@HAVE_NSS_TRUE@am__append_4 = $(nss_CFLAGS)
+@HAVE_NSS_TRUE@am__append_4 = modverify.c ../nsscommon.cxx
 @HAVE_NSS_TRUE@am__append_5 = $(nss_CFLAGS)
-@HAVE_NSS_TRUE@am__append_6 = $(nss_LIBS)
-@HAVE_MONITOR_LIBS_TRUE@am__append_7 = $(jsonc_LIBS) -lpanel $(ncurses_LIBS)
+@HAVE_NSS_TRUE@am__append_6 = $(nss_CFLAGS)
+@HAVE_NSS_TRUE@am__append_7 = $(nss_LIBS)
+@HAVE_MONITOR_LIBS_TRUE@am__append_8 = $(jsonc_LIBS) -lpanel $(ncurses_LIBS)
 subdir = staprun
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
 am__aclocal_m4_deps = $(top_srcdir)/m4/ax_check_compile_flag.m4 \
@@ -354,21 +355,15 @@ PKG_CONFIG = @PKG_CONFIG@
 PKG_CONFIG_LIBDIR = @PKG_CONFIG_LIBDIR@
 PKG_CONFIG_PATH = @PKG_CONFIG_PATH@
 POSUB = @POSUB@
-PYTHON = @PYTHON@
 PYTHON3 = @PYTHON3@
 PYTHON3_CONFIG = @PYTHON3_CONFIG@
 PYTHON3_CPPFLAGS = @PYTHON3_CPPFLAGS@
 PYTHON3_EXEC_PREFIX = @PYTHON3_EXEC_PREFIX@
+PYTHON3_LIBPYTHON = @PYTHON3_LIBPYTHON@
+PYTHON3_MINOR = @PYTHON3_MINOR@
 PYTHON3_PLATFORM = @PYTHON3_PLATFORM@
 PYTHON3_PREFIX = @PYTHON3_PREFIX@
 PYTHON3_VERSION = @PYTHON3_VERSION@
-PYTHON_CONFIG = @PYTHON_CONFIG@
-PYTHON_CPPFLAGS = @PYTHON_CPPFLAGS@
-PYTHON_EXEC_PREFIX = @PYTHON_EXEC_PREFIX@
-PYTHON_PLATFORM = @PYTHON_PLATFORM@
-PYTHON_PREFIX = @PYTHON_PREFIX@
-PYTHON_UNKNOWN = @PYTHON_UNKNOWN@
-PYTHON_VERSION = @PYTHON_VERSION@
 RANLIB = @RANLIB@
 READLINE_LIBS = @READLINE_LIBS@
 SED = @SED@
@@ -379,6 +374,7 @@ STAP_PREFIX = @STAP_PREFIX@
 STRIP = @STRIP@
 USE_NLS = @USE_NLS@
 VERSION = @VERSION@
+WNO_TEMPLATE_BODY = @WNO_TEMPLATE_BODY@
 XGETTEXT = @XGETTEXT@
 XGETTEXT_015 = @XGETTEXT_015@
 XGETTEXT_EXTRA_OPTIONS = @XGETTEXT_EXTRA_OPTIONS@
@@ -433,6 +429,8 @@ infodir = @infodir@
 install_sh = @install_sh@
 jsonc_CFLAGS = @jsonc_CFLAGS@
 jsonc_LIBS = @jsonc_LIBS@
+libbpf_CFLAGS = @libbpf_CFLAGS@
+libbpf_LIBS = @libbpf_LIBS@
 libdir = @libdir@
 libexecdir = @libexecdir@
 libvirt_CFLAGS = @libvirt_CFLAGS@
@@ -451,16 +449,12 @@ oldincludedir = @oldincludedir@
 openssl_CFLAGS = @openssl_CFLAGS@
 openssl_LIBS = @openssl_LIBS@
 pdfdir = @pdfdir@
-pkgpyexecdir = @pkgpyexecdir@
-pkgpythondir = @pkgpythondir@
 preferred_python = @preferred_python@
 prefix = @prefix@
 program_transform_name = @program_transform_name@
 psdir = @psdir@
 py3execdir = @py3execdir@
-pyexecdir = @pyexecdir@
 python3dir = @python3dir@
-pythondir = @pythondir@
 runstatedir = @runstatedir@
 sbindir = @sbindir@
 selinux_CFLAGS = @selinux_CFLAGS@
@@ -489,7 +483,7 @@ AUTOMAKE_OPTIONS = subdir-objects
 AM_CFLAGS = -Wall -Wextra -Wunused -W -Wformat=2 $(am__append_1) \
 	@PIECFLAGS@ $(am__empty)
 AM_CXXFLAGS = -Wall -Wextra -Wunused -W -Wformat=2 $(am__append_2) \
-	@PIECXXFLAGS@ $(am__empty)
+	$(am__append_3) @PIECXXFLAGS@
 AM_CPPFLAGS = -D_GNU_SOURCE -I$(srcdir)/../includes \
 	-I$(builddir)/../includes/sys -DBINDIR='"$(bindir)"' \
 	-DSYSCONFDIR='"$(sysconfdir)"' -DPKGDATADIR='"${pkgdatadir}"' \
@@ -503,17 +497,17 @@ noinst_LIBRARIES = libstrfloctime.a
 libstrfloctime_a_SOURCES = strfloctime.c
 libstrfloctime_a_CFLAGS = $(AM_CFLAGS) -Wno-format-nonliteral
 staprun_SOURCES = staprun.c staprun_funcs.c ctl.c common.c start_cmd.c \
-	../privilege.cxx ../staputil.cxx $(am__append_3)
+	../privilege.cxx ../staputil.cxx $(am__append_4)
 staprun_CFLAGS = $(AM_CFLAGS) -DSINGLE_THREADED $(debuginfod_CFLAGS) \
-	$(am__append_4)
+	$(am__append_5)
 staprun_CXXFLAGS = $(AM_CXXFLAGS) -DSINGLE_THREADED \
-	$(debuginfod_CFLAGS) $(am__append_5)
+	$(debuginfod_CFLAGS) $(am__append_6)
 staprun_CPPFLAGS = $(AM_CPPFLAGS)
 staprun_LDADD = libstrfloctime.a $(staprun_LIBS) $(debuginfod_LIBS) \
-	$(am__append_6)
+	$(am__append_7)
 staprun_LDFLAGS = $(AM_LDFLAGS) -Wl,--whole-archive,libstrfloctime.a,--no-whole-archive $(debuginfod_LDFLAGS)
 stapio_SOURCES = stapio.c mainloop.c common.c start_cmd.c ctl.c relay.c monitor.c
-stapio_LDADD = libstrfloctime.a -lpthread $(am__append_7)
+stapio_LDADD = libstrfloctime.a -lpthread $(am__append_8)
 stapio_LDFLAGS = -Wl,--whole-archive,libstrfloctime.a,--no-whole-archive
 man_MANS = staprun.8
 stap_merge_SOURCES = stap_merge.c

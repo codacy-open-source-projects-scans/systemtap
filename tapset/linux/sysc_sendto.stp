@@ -71,8 +71,8 @@
 	tolen = user_uint32(&@uint_cast(__args)[5])
 %)
 
-probe syscall.sendto = dw_syscall.sendto !, nd_syscall.sendto ? {}
-probe syscall.sendto.return = dw_syscall.sendto.return !,
+probe syscall.sendto = tp_syscall.sendto !, dw_syscall.sendto !, nd_syscall.sendto ? {}
+probe syscall.sendto.return = tp_syscall.sendto.return !, dw_syscall.sendto.return !,
                               nd_syscall.sendto.return ? {}
 
 # dw_sendto _____________________________________________________
@@ -158,7 +158,7 @@ probe __nd1_syscall.socketcall.sendto = kprobe.function("sys_socketcall").call ?
 	if (int_arg(1) != @const("SYS_SENDTO")) next;
 	@_SYSCALL_SOCKETCALL_SENDTO_REGARGS
 }
-probe __nd1_syscall.compat_socketcall.sendto =
+probe __nd1_syscall.compat_socketcall.sendto = 
 	kprobe.function("compat_sys_socketcall").call ?
 {
 	asmlinkage()
@@ -199,7 +199,7 @@ probe __nd2_syscall.compat_socketcall.sendto =
 	@_SYSCALL_COMPAT_SOCKETCALL_SENDTO_REGARGS
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
 probe tp_syscall.sendto = __tp_syscall.sendto ?,
 	__tp_syscall.socketcall.sendto ?
 {
@@ -209,18 +209,18 @@ probe tp_syscall.sendto = __tp_syscall.sendto ?,
 	to_str = _struct_sockaddr_u(to_uaddr, tolen)
 	@_SYSCALL_SENDTO_ARGSTR
 }
-probe __tp_syscall.sendto = kernel.trace("sys_enter")
+probe __tp_syscall.sendto = tp_syscall("sendto") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_gate(@const("__NR_sendto"))
 	@_SYSCALL_SENDTO_REGARGS
 },
 {
         %( @_IS_SREG_KERNEL %? @_SYSCALL_SENDTO_REGARGS_STORE %)
 }
-probe __tp_syscall.socketcall.sendto = kernel.trace("sys_enter")
+probe __tp_syscall.socketcall.sendto = tp_syscall("socketcall,~compat_socketcall") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_compat_gate(@const("__NR_socketcall"), @const("__NR_compat_socketcall"))
 	if (int_arg(1) != @const("SYS_SENDTO")) next;
 	if (@__compat_task) {
@@ -244,7 +244,7 @@ probe __nd1_syscall.sendto.return = kprobe.function("sys_sendto").return ?
 {
 	@__syscall_gate(@const("__NR_sendto"))
 }
-probe __nd1_syscall.socketcall.recv.return =
+probe __nd1_syscall.socketcall.recv.return = 
 	kprobe.function("sys_socketcall").return ?,
 	kprobe.function("compat_sys_socketcall").return ?
 {
@@ -267,20 +267,20 @@ probe __nd2_syscall.socketcall.sendto.return =
 	if (int_arg(1) != @const("SYS_SENDTO")) next;
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
 probe tp_syscall.sendto.return = __tp_syscall.sendto.return ?,
 	__tp_syscall.socketcall.sendto.return ?
 {
 	@_SYSCALL_SENDTO_NAME
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }
-probe __tp_syscall.sendto.return = kernel.trace("sys_exit")
+probe __tp_syscall.sendto.return = tp_syscall("sendto").return !, kernel.trace("sys_exit")
 {
 	@__syscall_gate(@const("__NR_sendto"))
 }
-probe __tp_syscall.socketcall.sendto.return = kernel.trace("sys_exit")
+probe __tp_syscall.socketcall.sendto.return = tp_syscall("socketcall,~compat_socketcall").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_compat_gate(@const("__NR_socketcall"), @const("__NR_compat_socketcall"))
 	if (int_arg(1) != @const("SYS_SENDTO")) next;
 }

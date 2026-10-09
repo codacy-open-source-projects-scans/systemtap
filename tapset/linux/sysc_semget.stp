@@ -54,8 +54,8 @@
 	  set_int_arg(4, semflg)
 %)
 
-probe syscall.semget = dw_syscall.semget !, nd_syscall.semget ? {}
-probe syscall.semget.return = dw_syscall.semget.return !,
+probe syscall.semget = tp_syscall.semget !, dw_syscall.semget !, nd_syscall.semget ? {}
+probe syscall.semget.return = tp_syscall.semget.return !, dw_syscall.semget.return !,
                               nd_syscall.semget.return ? {}
 
 # dw_semget _____________________________________________________
@@ -117,7 +117,7 @@ probe __nd2_syscall.compat_ipc.semget =
         %( @_IS_SREG_KERNEL %? @_SYSCALL_IPC_SEMGET_REGARGS_STORE %)
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
 probe tp_syscall.semget =
 	__tp_syscall.semget ?,
 	__tp_syscall.compat_ipc.semget ?
@@ -125,18 +125,18 @@ probe tp_syscall.semget =
 	@_SYSCALL_SEMGET_NAME
 	@_SYSCALL_SEMGET_ARGSTR
 }
-probe __tp_syscall.semget = kernel.trace("sys_enter")
+probe __tp_syscall.semget = tp_syscall("semget") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_gate(@const("__NR_semget"))
 	@_SYSCALL_SEMGET_REGARGS
 },
 {
         %( @_IS_SREG_KERNEL %? @_SYSCALL_SEMGET_REGARGS_STORE %)
 }
-probe __tp_syscall.compat_ipc.semget = kernel.trace("sys_enter")
+probe __tp_syscall.compat_ipc.semget = tp_syscall("~compat_ipc") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__compat_syscall_gate(@const("__NR_compat_ipc"))
 	if (int_arg(1) != @const("SEMGET")) next;
 	@_SYSCALL_IPC_SEMGET_REGARGS
@@ -169,21 +169,21 @@ probe __nd2_syscall.compat_ipc.semget.return =
 	if (int_arg(1) != @const("SEMGET")) next;
 }
  
-/* kernel 3.5+, but undesirable because it affects all syscalls */
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
 probe tp_syscall.semget.return =
 	__tp_syscall.semget.return ?,
 	__tp_syscall.compat_ipc.semget.return ?
 {
 	@_SYSCALL_SEMGET_NAME
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }
-probe __tp_syscall.semget.return = kernel.trace("sys_exit")
+probe __tp_syscall.semget.return = tp_syscall("semget").return !, kernel.trace("sys_exit")
 {
 	@__syscall_gate(@const("__NR_semget"))
 }
-probe __tp_syscall.compat_ipc.semget.return = kernel.trace("sys_exit")
+probe __tp_syscall.compat_ipc.semget.return = tp_syscall("~compat_ipc").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__compat_syscall_gate(@const("__NR_compat_ipc"))
 	if (int_arg(1) != @const("SEMGET")) next;
 }

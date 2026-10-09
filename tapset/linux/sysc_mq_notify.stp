@@ -28,8 +28,8 @@
 	  set_pointer_arg(2, notification_uaddr)
 %)
 
-probe syscall.mq_notify = dw_syscall.mq_notify !, nd_syscall.mq_notify ? {}
-probe syscall.mq_notify.return = dw_syscall.mq_notify.return !,
+probe syscall.mq_notify = tp_syscall.mq_notify !, dw_syscall.mq_notify !, nd_syscall.mq_notify ? {}
+probe syscall.mq_notify.return = tp_syscall.mq_notify.return !, dw_syscall.mq_notify.return !,
                                  nd_syscall.mq_notify.return ? {}
 
 # dw_mq_notify _____________________________________________________
@@ -64,7 +64,7 @@ probe __syscall.mq_notify.return = kernel.function("sys_mq_notify").return
 probe nd_syscall.mq_notify = nd1_syscall.mq_notify!, nd2_syscall.mq_notify!, tp_syscall.mq_notify
   { }
 
-probe nd1_syscall.mq_notify =
+probe nd1_syscall.mq_notify = 
         __nd1_syscall.mq_notify ?,
         kprobe.function("compat_sys_mq_notify") ?
 {
@@ -73,7 +73,7 @@ probe nd1_syscall.mq_notify =
 	@_SYSCALL_MQ_NOTIFY_REGARGS
 	@_SYSCALL_MQ_NOTIFY_ARGSTR
 }
-probe __nd1_syscall.mq_notify = kprobe.function("sys_mq_notify")
+probe __nd1_syscall.mq_notify = kprobe.function("sys_mq_notify") ?
 {
         @__syscall_gate(@const("__NR_mq_notify"))
 }
@@ -92,10 +92,10 @@ probe nd2_syscall.mq_notify =
         %( @_IS_SREG_KERNEL %? @_SYSCALL_MQ_NOTIFY_REGARGS_STORE %)
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.mq_notify = kernel.trace("sys_enter")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.mq_notify = tp_syscall("mq_notify,~compat_mq_notify") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_compat_gate(@const("__NR_mq_notify"), @const("__NR_compat_mq_notify"))
 	@_SYSCALL_MQ_NOTIFY_NAME
 	@_SYSCALL_MQ_NOTIFY_REGARGS
@@ -108,14 +108,14 @@ probe tp_syscall.mq_notify = kernel.trace("sys_enter")
 probe nd_syscall.mq_notify.return = nd1_syscall.mq_notify.return!, nd2_syscall.mq_notify.return!, tp_syscall.mq_notify.return
   { }
   
-probe nd1_syscall.mq_notify.return =
+probe nd1_syscall.mq_notify.return = 
         __nd1_syscall.mq_notify.return ?,
         kprobe.function("compat_sys_mq_notify").return ?
 {
 	@_SYSCALL_MQ_NOTIFY_NAME
 	@SYSC_RETVALSTR(returnval())
 }
-probe __nd1_syscall.mq_notify.return = kprobe.function("sys_mq_notify").return
+probe __nd1_syscall.mq_notify.return = kprobe.function("sys_mq_notify").return ?
 {
         @__syscall_gate(@const("__NR_mq_notify"))
 }
@@ -129,11 +129,11 @@ probe nd2_syscall.mq_notify.return =
 	@SYSC_RETVALSTR(returnval())
 }
  
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.mq_notify.return = kernel.trace("sys_exit")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.mq_notify.return = tp_syscall("mq_notify,~compat_mq_notify").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_compat_gate(@const("__NR_mq_notify"), @const("__NR_compat_mq_notify"))
 	@_SYSCALL_MQ_NOTIFY_NAME
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }

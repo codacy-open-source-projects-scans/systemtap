@@ -2,12 +2,12 @@
 .\"     Title: probe::nfs.fop.llseek
 .\"    Author: 
 .\" Generator: DocBook XSL Stylesheets vsnapshot <http://docbook.sf.net/>
-.\"      Date: October 2025
+.\"      Date: September 2026
 .\"    Manual: Network File Storage Tapsets
-.\"    Source: SystemTap Tapset Reference
+.\"    Source: SystemTap Tapset Reference Version 5.6
 .\"  Language: English
 .\"
-.TH "PROBE::NFS\&.FOP\&.L" "3stap" "October 2025" "SystemTap Tapset Reference" "Network File Storage Tapsets"
+.TH "PROBE::NFS\&.FOP\&.L" "3stap" "September 2026" "SystemTap Tapset Reference Ver" "Network File Storage Tapsets"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -32,7 +32,7 @@ probe::nfs.fop.llseek \- NFS client llseek operation
 .SH "SYNOPSIS"
 .sp
 .nf
-nfs\&.fop\&.llseek 
+probe nfs\&.fop\&.llseek {}
 .fi
 .SH "VALUES"
 .PP
@@ -46,9 +46,9 @@ the offset of the file will be repositioned
 device identifier
 .RE
 .PP
-\fIwhence_str\fR
+\fIino\fR
 .RS 4
-symbolic string representation of the position to seek from
+inode number
 .RE
 .PP
 \fIwhence\fR
@@ -56,9 +56,9 @@ symbolic string representation of the position to seek from
 the position to seek from
 .RE
 .PP
-\fIino\fR
+\fIwhence_str\fR
 .RS 4
-inode number
+symbolic string representation of the position to seek from
 .RE
 .SH SEE ALSO\n 
 .IR tapset::nfs (3stap)

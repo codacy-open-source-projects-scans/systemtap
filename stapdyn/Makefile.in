@@ -94,12 +94,13 @@ host_triplet = @host@
 target_triplet = @target@
 @Werror_TRUE@am__append_1 = -Werror
 @Werror_TRUE@am__append_2 = -Werror
-@HAVE_SELINUX_TRUE@am__append_3 = $(selinux_CFLAGS)
-@HAVE_SELINUX_TRUE@am__append_4 = $(selinux_LIBS)
+@enable_glibcxx_debug_TRUE@am__append_3 = -D_GLIBCXX_DEBUG -D_GLIBCXX_DEBUG_PEDANTIC
+@HAVE_SELINUX_TRUE@am__append_4 = $(selinux_CFLAGS)
+@HAVE_SELINUX_TRUE@am__append_5 = $(selinux_LIBS)
 bin_PROGRAMS = $(am__EXEEXT_1)
 noinst_PROGRAMS = $(am__EXEEXT_2)
-@HAVE_DYNINST_TRUE@am__append_5 = stapdyn
-@HAVE_DYNINST_TRUE@am__append_6 = dynsdt
+@HAVE_DYNINST_TRUE@am__append_6 = stapdyn
+@HAVE_DYNINST_TRUE@am__append_7 = dynsdt
 subdir = stapdyn
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
 am__aclocal_m4_deps = $(top_srcdir)/m4/ax_check_compile_flag.m4 \
@@ -134,6 +135,8 @@ dynsdt_LINK = $(CXXLD) $(dynsdt_CXXFLAGS) $(CXXFLAGS) \
 @HAVE_DYNINST_TRUE@	stapdyn-mutator.$(OBJEXT) \
 @HAVE_DYNINST_TRUE@	stapdyn-mutatee.$(OBJEXT) \
 @HAVE_DYNINST_TRUE@	stapdyn-dynprobe.$(OBJEXT) \
+@HAVE_DYNINST_TRUE@	stapdyn-dynhwbkpt.$(OBJEXT) \
+@HAVE_DYNINST_TRUE@	stapdyn-dynubacktrace.$(OBJEXT) \
 @HAVE_DYNINST_TRUE@	stapdyn-dynutil.$(OBJEXT) \
 @HAVE_DYNINST_TRUE@	../stapdyn-staputil.$(OBJEXT)
 stapdyn_OBJECTS = $(am_stapdyn_OBJECTS)
@@ -157,7 +160,9 @@ depcomp = $(SHELL) $(top_srcdir)/depcomp
 am__maybe_remake_depfiles = depfiles
 am__depfiles_remade = ../$(DEPDIR)/dynsdt-staputil.Po \
 	../$(DEPDIR)/stapdyn-staputil.Po ./$(DEPDIR)/dynsdt-dynsdt.Po \
-	./$(DEPDIR)/dynsdt-dynutil.Po ./$(DEPDIR)/stapdyn-dynprobe.Po \
+	./$(DEPDIR)/dynsdt-dynutil.Po ./$(DEPDIR)/stapdyn-dynhwbkpt.Po \
+	./$(DEPDIR)/stapdyn-dynprobe.Po \
+	./$(DEPDIR)/stapdyn-dynubacktrace.Po \
 	./$(DEPDIR)/stapdyn-dynutil.Po ./$(DEPDIR)/stapdyn-mutatee.Po \
 	./$(DEPDIR)/stapdyn-mutator.Po ./$(DEPDIR)/stapdyn-stapdyn.Po
 am__mv = mv -f
@@ -307,21 +312,15 @@ PKG_CONFIG = @PKG_CONFIG@
 PKG_CONFIG_LIBDIR = @PKG_CONFIG_LIBDIR@
 PKG_CONFIG_PATH = @PKG_CONFIG_PATH@
 POSUB = @POSUB@
-PYTHON = @PYTHON@
 PYTHON3 = @PYTHON3@
 PYTHON3_CONFIG = @PYTHON3_CONFIG@
 PYTHON3_CPPFLAGS = @PYTHON3_CPPFLAGS@
 PYTHON3_EXEC_PREFIX = @PYTHON3_EXEC_PREFIX@
+PYTHON3_LIBPYTHON = @PYTHON3_LIBPYTHON@
+PYTHON3_MINOR = @PYTHON3_MINOR@
 PYTHON3_PLATFORM = @PYTHON3_PLATFORM@
 PYTHON3_PREFIX = @PYTHON3_PREFIX@
 PYTHON3_VERSION = @PYTHON3_VERSION@
-PYTHON_CONFIG = @PYTHON_CONFIG@
-PYTHON_CPPFLAGS = @PYTHON_CPPFLAGS@
-PYTHON_EXEC_PREFIX = @PYTHON_EXEC_PREFIX@
-PYTHON_PLATFORM = @PYTHON_PLATFORM@
-PYTHON_PREFIX = @PYTHON_PREFIX@
-PYTHON_UNKNOWN = @PYTHON_UNKNOWN@
-PYTHON_VERSION = @PYTHON_VERSION@
 RANLIB = @RANLIB@
 READLINE_LIBS = @READLINE_LIBS@
 SED = @SED@
@@ -332,6 +331,7 @@ STAP_PREFIX = @STAP_PREFIX@
 STRIP = @STRIP@
 USE_NLS = @USE_NLS@
 VERSION = @VERSION@
+WNO_TEMPLATE_BODY = @WNO_TEMPLATE_BODY@
 XGETTEXT = @XGETTEXT@
 XGETTEXT_015 = @XGETTEXT_015@
 XGETTEXT_EXTRA_OPTIONS = @XGETTEXT_EXTRA_OPTIONS@
@@ -386,6 +386,8 @@ infodir = @infodir@
 install_sh = @install_sh@
 jsonc_CFLAGS = @jsonc_CFLAGS@
 jsonc_LIBS = @jsonc_LIBS@
+libbpf_CFLAGS = @libbpf_CFLAGS@
+libbpf_LIBS = @libbpf_LIBS@
 libdir = @libdir@
 libexecdir = @libexecdir@
 libvirt_CFLAGS = @libvirt_CFLAGS@
@@ -404,16 +406,12 @@ oldincludedir = @oldincludedir@
 openssl_CFLAGS = @openssl_CFLAGS@
 openssl_LIBS = @openssl_LIBS@
 pdfdir = @pdfdir@
-pkgpyexecdir = @pkgpyexecdir@
-pkgpythondir = @pkgpythondir@
 preferred_python = @preferred_python@
 prefix = @prefix@
 program_transform_name = @program_transform_name@
 psdir = @psdir@
 py3execdir = @py3execdir@
-pyexecdir = @pyexecdir@
 python3dir = @python3dir@
-pythondir = @pythondir@
 runstatedir = @runstatedir@
 sbindir = @sbindir@
 selinux_CFLAGS = @selinux_CFLAGS@
@@ -440,20 +438,22 @@ top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
 AUTOMAKE_OPTIONS = subdir-objects
 AM_CFLAGS = -Wall -Wunused -W -Wformat $(am__append_1) @PIECFLAGS@
-AM_CXXFLAGS = -Wall -Wunused -W -Wformat $(am__append_2) @PIECXXFLAGS@
+AM_CXXFLAGS = -Wall -Wunused -W -Wformat $(am__append_2) \
+	$(am__append_3) @PIECXXFLAGS@
 AM_CPPFLAGS = -D_GNU_SOURCE -I$(srcdir)/../includes \
 	-I$(builddir)/../includes/sys -DBINDIR='"$(bindir)"' \
 	-DSYSCONFDIR='"$(sysconfdir)"' -DPKGDATADIR='"${pkgdatadir}"' \
 	-DPKGLIBDIR='"$(pkglibexecdir)"' -DLOCALEDIR='"$(localedir)"' \
-	$(am__append_3)
-AM_LDFLAGS = @PIELDFLAGS@ @BOOST_SYSTEM_LIB@ $(am__append_4)
+	$(am__append_4)
+AM_LDFLAGS = @PIELDFLAGS@ @BOOST_SYSTEM_LIB@ $(am__append_5)
 @HAVE_DYNINST_TRUE@man_MANS = stapdyn.8
 @HAVE_DYNINST_TRUE@stapdyn_SOURCES = stapdyn.cxx mutator.cxx mutatee.cxx \
-@HAVE_DYNINST_TRUE@				  dynprobe.cxx dynutil.cxx ../staputil.cxx
+@HAVE_DYNINST_TRUE@				  dynprobe.cxx dynhwbkpt.cxx dynubacktrace.cxx \
+@HAVE_DYNINST_TRUE@				  dynutil.cxx ../staputil.cxx
 
-@HAVE_DYNINST_TRUE@stapdyn_CXXFLAGS = $(AM_CXXFLAGS) @DYNINST_CXXFLAGS@ $(debuginfod_CFLAGS)
+@HAVE_DYNINST_TRUE@stapdyn_CXXFLAGS = $(AM_CXXFLAGS) @DYNINST_CXXFLAGS@ $(debuginfod_CFLAGS) @WNO_TEMPLATE_BODY@
 @HAVE_DYNINST_TRUE@stapdyn_LDFLAGS = $(AM_LDFLAGS) @DYNINST_LDFLAGS@ $(debuginfod_LDFLAGS)
-@HAVE_DYNINST_TRUE@stapdyn_LDADD = -ldl -ldyninstAPI -lsymtabAPI -lpthread $(debuginfod_LIBS)
+@HAVE_DYNINST_TRUE@stapdyn_LDADD = -ldl -ldyninstAPI -lsymtabAPI -lpcontrol -lstackwalk -lcommon -ldw -lelf -lpthread $(debuginfod_LIBS)
 @HAVE_DYNINST_TRUE@stapdyn_CFLAGS = $(debuginfod_CFLAGS)
 @HAVE_DYNINST_TRUE@dynsdt_SOURCES = dynsdt.cxx dynutil.cxx ../staputil.cxx
 @HAVE_DYNINST_TRUE@dynsdt_CPPFLAGS = $(AM_CPPFLAGS)
@@ -573,7 +573,9 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@../$(DEPDIR)/stapdyn-staputil.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/dynsdt-dynsdt.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/dynsdt-dynutil.Po@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/stapdyn-dynhwbkpt.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/stapdyn-dynprobe.Po@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/stapdyn-dynubacktrace.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/stapdyn-dynutil.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/stapdyn-mutatee.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/stapdyn-mutator.Po@am__quote@ # am--include-marker
@@ -698,6 +700,34 @@ stapdyn-dynprobe.obj: dynprobe.cxx
 @AMDEP_TRUE@@am__fastdepCXX_FALSE@	$(AM_V_CXX)source='dynprobe.cxx' object='stapdyn-dynprobe.obj' libtool=no @AMDEPBACKSLASH@
 @AMDEP_TRUE@@am__fastdepCXX_FALSE@	DEPDIR=$(DEPDIR) $(CXXDEPMODE) $(depcomp) @AMDEPBACKSLASH@
 @am__fastdepCXX_FALSE@	$(AM_V_CXX@am__nodep@)$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(stapdyn_CXXFLAGS) $(CXXFLAGS) -c -o stapdyn-dynprobe.obj `if test -f 'dynprobe.cxx'; then $(CYGPATH_W) 'dynprobe.cxx'; else $(CYGPATH_W) '$(srcdir)/dynprobe.cxx'; fi`
+
+stapdyn-dynhwbkpt.o: dynhwbkpt.cxx
+@am__fastdepCXX_TRUE@	$(AM_V_CXX)$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(stapdyn_CXXFLAGS) $(CXXFLAGS) -MT stapdyn-dynhwbkpt.o -MD -MP -MF $(DEPDIR)/stapdyn-dynhwbkpt.Tpo -c -o stapdyn-dynhwbkpt.o `test -f 'dynhwbkpt.cxx' || echo '$(srcdir)/'`dynhwbkpt.cxx
+@am__fastdepCXX_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/stapdyn-dynhwbkpt.Tpo $(DEPDIR)/stapdyn-dynhwbkpt.Po
+@AMDEP_TRUE@@am__fastdepCXX_FALSE@	$(AM_V_CXX)source='dynhwbkpt.cxx' object='stapdyn-dynhwbkpt.o' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCXX_FALSE@	DEPDIR=$(DEPDIR) $(CXXDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCXX_FALSE@	$(AM_V_CXX@am__nodep@)$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(stapdyn_CXXFLAGS) $(CXXFLAGS) -c -o stapdyn-dynhwbkpt.o `test -f 'dynhwbkpt.cxx' || echo '$(srcdir)/'`dynhwbkpt.cxx
+
+stapdyn-dynhwbkpt.obj: dynhwbkpt.cxx
+@am__fastdepCXX_TRUE@	$(AM_V_CXX)$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(stapdyn_CXXFLAGS) $(CXXFLAGS) -MT stapdyn-dynhwbkpt.obj -MD -MP -MF $(DEPDIR)/stapdyn-dynhwbkpt.Tpo -c -o stapdyn-dynhwbkpt.obj `if test -f 'dynhwbkpt.cxx'; then $(CYGPATH_W) 'dynhwbkpt.cxx'; else $(CYGPATH_W) '$(srcdir)/dynhwbkpt.cxx'; fi`
+@am__fastdepCXX_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/stapdyn-dynhwbkpt.Tpo $(DEPDIR)/stapdyn-dynhwbkpt.Po
+@AMDEP_TRUE@@am__fastdepCXX_FALSE@	$(AM_V_CXX)source='dynhwbkpt.cxx' object='stapdyn-dynhwbkpt.obj' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCXX_FALSE@	DEPDIR=$(DEPDIR) $(CXXDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCXX_FALSE@	$(AM_V_CXX@am__nodep@)$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(stapdyn_CXXFLAGS) $(CXXFLAGS) -c -o stapdyn-dynhwbkpt.obj `if test -f 'dynhwbkpt.cxx'; then $(CYGPATH_W) 'dynhwbkpt.cxx'; else $(CYGPATH_W) '$(srcdir)/dynhwbkpt.cxx'; fi`
+
+stapdyn-dynubacktrace.o: dynubacktrace.cxx
+@am__fastdepCXX_TRUE@	$(AM_V_CXX)$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(stapdyn_CXXFLAGS) $(CXXFLAGS) -MT stapdyn-dynubacktrace.o -MD -MP -MF $(DEPDIR)/stapdyn-dynubacktrace.Tpo -c -o stapdyn-dynubacktrace.o `test -f 'dynubacktrace.cxx' || echo '$(srcdir)/'`dynubacktrace.cxx
+@am__fastdepCXX_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/stapdyn-dynubacktrace.Tpo $(DEPDIR)/stapdyn-dynubacktrace.Po
+@AMDEP_TRUE@@am__fastdepCXX_FALSE@	$(AM_V_CXX)source='dynubacktrace.cxx' object='stapdyn-dynubacktrace.o' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCXX_FALSE@	DEPDIR=$(DEPDIR) $(CXXDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCXX_FALSE@	$(AM_V_CXX@am__nodep@)$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(stapdyn_CXXFLAGS) $(CXXFLAGS) -c -o stapdyn-dynubacktrace.o `test -f 'dynubacktrace.cxx' || echo '$(srcdir)/'`dynubacktrace.cxx
+
+stapdyn-dynubacktrace.obj: dynubacktrace.cxx
+@am__fastdepCXX_TRUE@	$(AM_V_CXX)$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(stapdyn_CXXFLAGS) $(CXXFLAGS) -MT stapdyn-dynubacktrace.obj -MD -MP -MF $(DEPDIR)/stapdyn-dynubacktrace.Tpo -c -o stapdyn-dynubacktrace.obj `if test -f 'dynubacktrace.cxx'; then $(CYGPATH_W) 'dynubacktrace.cxx'; else $(CYGPATH_W) '$(srcdir)/dynubacktrace.cxx'; fi`
+@am__fastdepCXX_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/stapdyn-dynubacktrace.Tpo $(DEPDIR)/stapdyn-dynubacktrace.Po
+@AMDEP_TRUE@@am__fastdepCXX_FALSE@	$(AM_V_CXX)source='dynubacktrace.cxx' object='stapdyn-dynubacktrace.obj' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCXX_FALSE@	DEPDIR=$(DEPDIR) $(CXXDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCXX_FALSE@	$(AM_V_CXX@am__nodep@)$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(stapdyn_CXXFLAGS) $(CXXFLAGS) -c -o stapdyn-dynubacktrace.obj `if test -f 'dynubacktrace.cxx'; then $(CYGPATH_W) 'dynubacktrace.cxx'; else $(CYGPATH_W) '$(srcdir)/dynubacktrace.cxx'; fi`
 
 stapdyn-dynutil.o: dynutil.cxx
 @am__fastdepCXX_TRUE@	$(AM_V_CXX)$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(stapdyn_CXXFLAGS) $(CXXFLAGS) -MT stapdyn-dynutil.o -MD -MP -MF $(DEPDIR)/stapdyn-dynutil.Tpo -c -o stapdyn-dynutil.o `test -f 'dynutil.cxx' || echo '$(srcdir)/'`dynutil.cxx
@@ -874,7 +904,9 @@ distclean: distclean-am
 	-rm -f ../$(DEPDIR)/stapdyn-staputil.Po
 	-rm -f ./$(DEPDIR)/dynsdt-dynsdt.Po
 	-rm -f ./$(DEPDIR)/dynsdt-dynutil.Po
+	-rm -f ./$(DEPDIR)/stapdyn-dynhwbkpt.Po
 	-rm -f ./$(DEPDIR)/stapdyn-dynprobe.Po
+	-rm -f ./$(DEPDIR)/stapdyn-dynubacktrace.Po
 	-rm -f ./$(DEPDIR)/stapdyn-dynutil.Po
 	-rm -f ./$(DEPDIR)/stapdyn-mutatee.Po
 	-rm -f ./$(DEPDIR)/stapdyn-mutator.Po
@@ -928,7 +960,9 @@ maintainer-clean: maintainer-clean-am
 	-rm -f ../$(DEPDIR)/stapdyn-staputil.Po
 	-rm -f ./$(DEPDIR)/dynsdt-dynsdt.Po
 	-rm -f ./$(DEPDIR)/dynsdt-dynutil.Po
+	-rm -f ./$(DEPDIR)/stapdyn-dynhwbkpt.Po
 	-rm -f ./$(DEPDIR)/stapdyn-dynprobe.Po
+	-rm -f ./$(DEPDIR)/stapdyn-dynubacktrace.Po
 	-rm -f ./$(DEPDIR)/stapdyn-dynutil.Po
 	-rm -f ./$(DEPDIR)/stapdyn-mutatee.Po
 	-rm -f ./$(DEPDIR)/stapdyn-mutator.Po

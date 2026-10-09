@@ -61,8 +61,8 @@ run_make_cmd(systemtap_session& s, vector<string>& make_cmd,
       make_cmd.push_back("--no-print-directory");
     }
 
-  // Exploit SMP parallelism, if available.
-  long smp = thread::hardware_concurrency();
+  // Exploit SMP parallelism, if available (honors STAP_NTHREADS).
+  long smp = stap_nthreads();
   if (smp <= 0) smp = 1;
   // PR16276: but only if we're not running severely nproc-rlimited
   struct rlimit rlim;
@@ -85,6 +85,35 @@ run_make_cmd(systemtap_session& s, vector<string>& make_cmd,
   if (rc != 0)
     s.set_try_server ();
   return rc;
+}
+
+/* If debug_build, and pahole(1) is available, run it on the generated
+   module (.ko or .so) and save the output in the tmpdir for later
+   analysis of debuginfo / code generation.  Never fails the build. */
+static void
+run_pahole (systemtap_session& s)
+{
+  if (! s.debug_build)
+    return;
+
+  const string module = s.tmpdir + "/" + s.module_filename();
+  string pahole_out = s.tmpdir + "/" + s.module_name + ".pahole";
+
+  // Use sh -c so we can conditionalize on pahole presence without
+  // failing if it's not installed.
+  vector<string> cmd {
+    "sh", "-c",
+    "command -v pahole >/dev/null 2>&1 && "
+    "pahole '" + module + "' > '" + pahole_out + "' 2>&1 || true"
+  };
+
+  if (s.verbose > 1)
+    clog << _("Pass 4: running pahole on ") << module << endl;
+
+  // Run quietly unless very verbose; ignore rc.
+  (void) stap_system (s.verbose, cmd,
+                      /* null_out */ (s.verbose < 3),
+                      /* null_err */ (s.verbose < 3));
 }
 
 static vector<string>
@@ -152,6 +181,17 @@ make_any_make_cmd(systemtap_session& s, const string& dir, const string& target)
 
   // Add any custom kbuild flags
   make_cmd.insert(make_cmd.end(), s.kbuildflags.begin(), s.kbuildflags.end());
+
+  if (s.debug_build)
+    {
+      // Override the default suppression of debuginfo (PR13847).
+      // Request -g and -save-temps artifacts via the standard kbuild
+      // mechanism only (ccflags-y/EXTRA_CFLAGS in the generated Makefile
+      // below, plus CONFIG_DEBUG_INFO=y).  KBUILD_CFLAGS is too blunt
+      // and interacts badly with the kernel build's C dialect/warning
+      // setup on picky environments (rawhide gcc-15 + 7.x kernels).
+      make_cmd.push_back("CONFIG_DEBUG_INFO=y");
+    }
 
   return make_cmd;
 }
@@ -263,12 +303,22 @@ compile_dyninst (systemtap_session& s)
   if (s.verbose > 3)
     cmd.insert(cmd.end(), { "-ftime-report", "-Q" });
 
+  if (s.debug_build)
+    {
+      // Maximize debug info and preserve temps for misgeneration analysis.
+      cmd.push_back("-g");
+      cmd.push_back("-save-temps=obj");
+      cmd.push_back("-fverbose-asm");
+    }
+
   // Add any custom kbuild flags
   cmd.insert(cmd.end(), s.kbuildflags.begin(), s.kbuildflags.end());
 
   int rc = stap_system (s.verbose, cmd);
   if (rc)
     s.set_try_server ();
+  else
+    run_pahole (s);
   return rc;
 }
 
@@ -321,8 +371,11 @@ compile_pass (systemtap_session& s)
   o << "CHECK_BUILD := $(CC) -DMODULE $(NOSTDINC_FLAGS) $(KBUILD_CPPFLAGS) $(CPPFLAGS) "
     << "$(LINUXINCLUDE) $(_KBUILD_CFLAGS) $(CFLAGS_KERNEL) $(" << extra_cflags << ") "
     << "$(CFLAGS) -DKBUILD_BASENAME=\\\"" << s.module_name << "\\\" "
+    << "-DKBUILD_MODNAME=\\\"" << s.module_name << "\\\" "
     << "-Wmissing-prototypes "  // GCC14 prep, PR31288
-    << "-Werror" << " -S -o /dev/null -xc " << endl;
+    << "-Werror"
+    << " -Wno-error=unused-value" // kernel fortify-string.h comma expressions
+    << " -S -o /dev/null -xc " << endl;
   o << "stap_check_build = $(shell " << superverbose << " if $(CHECK_BUILD) $(1) "
     << redirecterrors << " ; then echo \"$(2)\"; else echo \"$(3)\"; fi)" << endl;
 
@@ -472,6 +525,7 @@ compile_pass (systemtap_session& s)
   output_autoconf(s, o, cs, "autoconf-uapi-mount.c", "STAPCONF_UAPI_LINUX_MOUNT_H", NULL);
   output_autoconf(s, o, cs, "autoconf-time32.c", "STAPCONF_TIME32_H", NULL);
   output_autoconf(s, o, cs, "autoconf-time32-old.c", "STAPCONF_TIME32_OLD_H", NULL);
+  output_autoconf(s, o, cs, "autoconf-time-types.c", "STAPCONF_TIME_TYPES_H", NULL);
   output_autoconf(s, o, cs, "autoconf-compat-utimbuf.c", "STAPCONF_COMPAT_UTIMBUF", NULL);
   output_exportconf(s, o2, "lookup_noperm", "STAPCONF_LOOKUP_NOPERM");
   
@@ -532,6 +586,10 @@ compile_pass (systemtap_session& s)
 
   output_autoconf(s, o, cs, "autoconf-tracepoint-has-data.c", "STAPCONF_TRACEPOINT_HAS_DATA", NULL);
   output_autoconf(s, o, cs, "autoconf-tracepoint-strings.c", "STAPCONF_TRACEPOINT_STRINGS", NULL);
+  output_autoconf(s, o, cs, "autoconf-tracepoint-typecheck.c",
+                  "STAPCONF_TRACEPOINT_TYPECHECK", NULL);
+  output_autoconf(s, o, cs, "autoconf-tracepoint-declare-tp.c",
+                  "STAPCONF_TRACEPOINT_DECLARE_TP", NULL);
   output_autoconf(s, o, cs, "autoconf-timerfd.c", "STAPCONF_TIMERFD_H", NULL);
 
   output_autoconf(s, o, cs, "autoconf-module_layout.c",
@@ -547,10 +605,14 @@ compile_pass (systemtap_session& s)
 		  "STAPCONF_GET_USER_PAGES_REMOTE_FLAGS_LOCKED", NULL);
   output_autoconf(s, o, cs, "autoconf-get_user_pages_remote-notask_struct.c",
 		  "STAPCONF_GET_USER_PAGES_REMOTE_NOTASK_STRUCT", NULL);
+  output_autoconf(s, o, cs, "autoconf-get_user_pages_remote-locked.c",
+		  "STAPCONF_GET_USER_PAGES_REMOTE_LOCKED", NULL);
   output_autoconf(s, o, cs, "autoconf-get_user_pages-flags.c",
 		  "STAPCONF_GET_USER_PAGES_FLAGS", NULL);
   output_autoconf(s, o, cs, "autoconf-get_user_pages-notask_struct.c",
 		  "STAPCONF_GET_USER_PAGES_NOTASK_STRUCT", NULL);
+  output_autoconf(s, o, cs, "autoconf-get_user_pages-no-mm.c",
+		  "STAPCONF_GET_USER_PAGES_NO_MM", NULL);
   output_autoconf(s, o, cs, "autoconf-get_user_page_vma_remote.c",
 		  "STAPCONF_GET_USER_PAGE_VMA_REMOTE", NULL);
   output_autoconf(s, o, cs, "autoconf-bio-bi_opf.c", "STAPCONF_BIO_BI_OPF", NULL);
@@ -568,6 +630,12 @@ compile_pass (systemtap_session& s)
 		  "STAPCONF_HLIST_ADD_TAIL_RCU", NULL);
   output_autoconf(s, o, cs, "autoconf-files_lookup_fd_raw.c",
                   "STAPCONF_FILES_LOOKUP_FD_RAW", NULL);
+  output_autoconf(s, o, cs, "autoconf-file_lock_core.c",
+                  "STAPCONF_FILE_LOCK_CORE", NULL);
+  output_autoconf(s, o, cs, "autoconf-linux-filelock-h.c",
+                  "STAPCONF_LINUX_FILELOCK_H", NULL);
+  output_autoconf(s, o, cs, "autoconf-do_sock_getsockopt.c",
+                  "STAPCONF_DO_SOCK_GETSOCKOPT", NULL);
   output_autoconf(s, o, cs, "autoconf-task-state.c", "STAPCONF_TASK_STATE", NULL);
 
   output_autoconf(s, o, cs, "autoconf-linux-unaligned-h.c", "STAPCONF_LINUX_UNALIGNED_H", NULL);
@@ -620,11 +688,14 @@ compile_pass (systemtap_session& s)
   if (s.verbose > 3)
     o << extra_cflags << " += -ftime-report -Q" << endl;
 
-  // XXX: unfortunately, -save-temps can't work since linux kbuild cwd
-  // is not writable.
-  //
-  // if (s.keep_tmpdir)
-  // o << "CFLAGS += -fverbose-asm -save-temps" << endl;
+  if (s.debug_build)
+    {
+      // Add debug flags via the standard kbuild per-module mechanism
+      // (same "where" as kernel_extra_cflags, c_macros, -Werror etc.).
+      // This is the careful way that avoids perturbing kbuild's base
+      // CFLAGS setup.  -save-temps=obj gives us .i/.s intermediates.
+      o << extra_cflags << " += -g -save-temps=obj -fverbose-asm" << endl;
+    }
 
   // Kernels can be compiled with CONFIG_CC_OPTIMIZE_FOR_SIZE to select
   // -Os, otherwise -O2 is the default.
@@ -655,6 +726,11 @@ compile_pass (systemtap_session& s)
 
   // Assumes linux 2.6 kbuild
   o << extra_cflags << " += -Wno-unused " << "-Werror" << endl;
+
+  // The kernel's fortify-string.h expands memset()/memcpy() calls into
+  // comma expressions whose left-hand check call gcc 14+ flags with
+  // -Wunused-value.  Keep that informational instead of failing the build.
+  o << extra_cflags << " += -Wno-error=unused-value" << endl;
   #if CHECK_POINTER_ARITH_PR5947
   o << extra_cflags << " += -Wpointer-arith" << endl;
   #endif
@@ -767,6 +843,8 @@ compile_pass (systemtap_session& s)
   rc = run_make_cmd(s, make_cmd);
   if (rc)
     s.set_try_server ();
+  else
+    run_pahole (s);
   return rc;
 }
 
@@ -1104,8 +1182,8 @@ make_tracequeries(systemtap_session& s, const map<string,string>& contents)
   // create a simple Makefile
   string makefile(dir + "/Makefile");
   ofstream omf(makefile.c_str());
-  // force debuginfo generation, and relax implicit functions
-  omf << extra_cflags << " := -g -Wno-implicit-function-declaration " << "-Werror" << endl;
+  // force debuginfo generation
+  omf << extra_cflags << " := -g " << "-Werror" << endl;
   // RHBZ 655231: later rhel6 kernels' module-signing kbuild logic breaks out-of-tree modules
   omf << "CONFIG_MODULE_SIG := n" << endl;
   // PR23488: need to override this kconfig, else we get no useful struct decls

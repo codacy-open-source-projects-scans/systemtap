@@ -96,37 +96,38 @@ host_triplet = @host@
 target_triplet = @target@
 @Werror_TRUE@am__append_1 = -Werror
 @Werror_TRUE@am__append_2 = -Werror
+@enable_glibcxx_debug_TRUE@am__append_3 = -D_GLIBCXX_DEBUG -D_GLIBCXX_DEBUG_PEDANTIC
 bin_PROGRAMS = $(am__EXEEXT_1) $(am__EXEEXT_2)
-@BUILD_TRANSLATOR_TRUE@am__append_3 = stap
-@BUILD_TRANSLATOR_TRUE@am__append_4 = dtrace
+@BUILD_TRANSLATOR_TRUE@am__append_4 = stap
+@BUILD_TRANSLATOR_TRUE@am__append_5 = dtrace
 @BUILD_TRANSLATOR_TRUE@pkglibexec_PROGRAMS = $(am__EXEEXT_3) \
 @BUILD_TRANSLATOR_TRUE@	$(am__EXEEXT_4)
-@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@am__append_5 = stap-sign-module stap-authorize-cert
-@BUILD_SERVER_TRUE@@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@am__append_6 = stap-serverd stap-gen-cert
-@BUILD_SERVER_TRUE@@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@am__append_7 = stap-server
-@BUILD_SERVER_TRUE@@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@am__append_8 = stap-start-server stap-stop-server
-@BUILD_TRANSLATOR_TRUE@@HAVE_LANGUAGE_SERVER_SUPPORT_TRUE@am__append_9 = language-server/stap-language-server.cxx \
+@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@am__append_6 = stap-sign-module stap-authorize-cert
+@BUILD_SERVER_TRUE@@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@am__append_7 = stap-serverd stap-gen-cert
+@BUILD_SERVER_TRUE@@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@am__append_8 = stap-server
+@BUILD_SERVER_TRUE@@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@am__append_9 = stap-start-server stap-stop-server
+@BUILD_TRANSLATOR_TRUE@@HAVE_LANGUAGE_SERVER_SUPPORT_TRUE@am__append_10 = language-server/stap-language-server.cxx \
 @BUILD_TRANSLATOR_TRUE@@HAVE_LANGUAGE_SERVER_SUPPORT_TRUE@	language-server/stap-code-completion.cxx language-server/jsonrpc.cxx
 
-@BUILD_TRANSLATOR_TRUE@@HAVE_LIBREADLINE_TRUE@am__append_10 = interactive.cxx
-@BUILD_TRANSLATOR_TRUE@@HAVE_LIBREADLINE_TRUE@am__append_11 = @READLINE_LIBS@
-@BUILD_TRANSLATOR_TRUE@@HAVE_JSON_C_TRUE@am__append_12 = $(jsonc_LIBS)
-@BUILD_TRANSLATOR_TRUE@@HAVE_BPF_DECLS_TRUE@am__append_13 = bpf-base.cxx bpf-bitset.cxx bpf-translate.cxx bpf-opt.cxx
-@BUILD_TRANSLATOR_TRUE@@BUILD_VIRT_TRUE@am__append_14 = stapvirt
-@BUILD_TRANSLATOR_TRUE@@HAVE_DYNINST_TRUE@am__append_15 = $(DYNINST_CXXFLAGS)
-@BUILD_TRANSLATOR_TRUE@@HAVE_AVAHI_TRUE@am__append_16 = $(avahi_CFLAGS)
+@BUILD_TRANSLATOR_TRUE@@HAVE_LIBREADLINE_TRUE@am__append_11 = interactive.cxx
+@BUILD_TRANSLATOR_TRUE@@HAVE_LIBREADLINE_TRUE@am__append_12 = @READLINE_LIBS@
+@BUILD_TRANSLATOR_TRUE@@HAVE_JSON_C_TRUE@am__append_13 = $(jsonc_LIBS)
+@BUILD_TRANSLATOR_TRUE@@HAVE_BPF_DECLS_TRUE@am__append_14 = bpf-base.cxx bpf-bitset.cxx bpf-translate.cxx bpf-opt.cxx
+@BUILD_TRANSLATOR_TRUE@@BUILD_VIRT_TRUE@am__append_15 = stapvirt
+@BUILD_TRANSLATOR_TRUE@@HAVE_DYNINST_TRUE@am__append_16 = $(DYNINST_CXXFLAGS)
 @BUILD_TRANSLATOR_TRUE@@HAVE_AVAHI_TRUE@am__append_17 = $(avahi_CFLAGS)
-@BUILD_TRANSLATOR_TRUE@@HAVE_AVAHI_TRUE@am__append_18 = $(avahi_LIBS)
-@BUILD_TRANSLATOR_TRUE@@NEED_BASE_CLIENT_CODE_TRUE@am__append_19 = csclient.cxx
-@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@am__append_20 = nsscommon.cxx client-nss.cxx cscommon.cxx nss-server-info.cxx
-@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@am__append_21 = $(nss_CFLAGS) -DSTAP
-@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@am__append_22 = $(nss_CFLAGS)
+@BUILD_TRANSLATOR_TRUE@@HAVE_AVAHI_TRUE@am__append_18 = $(avahi_CFLAGS)
+@BUILD_TRANSLATOR_TRUE@@HAVE_AVAHI_TRUE@am__append_19 = $(avahi_LIBS)
+@BUILD_TRANSLATOR_TRUE@@NEED_BASE_CLIENT_CODE_TRUE@am__append_20 = csclient.cxx
+@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@am__append_21 = nsscommon.cxx client-nss.cxx cscommon.cxx nss-server-info.cxx
+@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@am__append_22 = $(nss_CFLAGS) -DSTAP
 @BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@am__append_23 = $(nss_CFLAGS)
-@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@am__append_24 = $(nss_LIBS)
-@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@am__append_25 = install-scripts
-@BUILD_SERVER_TRUE@@BUILD_TRANSLATOR_TRUE@@HAVE_AVAHI_TRUE@@HAVE_NSS_TRUE@am__append_26 = $(avahi_CFLAGS)
+@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@am__append_24 = $(nss_CFLAGS)
+@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@am__append_25 = $(nss_LIBS)
+@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@am__append_26 = install-scripts
 @BUILD_SERVER_TRUE@@BUILD_TRANSLATOR_TRUE@@HAVE_AVAHI_TRUE@@HAVE_NSS_TRUE@am__append_27 = $(avahi_CFLAGS)
-@BUILD_SERVER_TRUE@@BUILD_TRANSLATOR_TRUE@@HAVE_AVAHI_TRUE@@HAVE_NSS_TRUE@am__append_28 = $(avahi_LIBS)
+@BUILD_SERVER_TRUE@@BUILD_TRANSLATOR_TRUE@@HAVE_AVAHI_TRUE@@HAVE_NSS_TRUE@am__append_28 = $(avahi_CFLAGS)
+@BUILD_SERVER_TRUE@@BUILD_TRANSLATOR_TRUE@@HAVE_AVAHI_TRUE@@HAVE_NSS_TRUE@am__append_29 = $(avahi_LIBS)
 subdir = .
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
 am__aclocal_m4_deps = $(top_srcdir)/m4/ax_check_compile_flag.m4 \
@@ -147,8 +148,9 @@ am__CONFIG_DISTCLEAN_FILES = config.status config.cache config.log \
 mkinstalldirs = $(install_sh) -d
 CONFIG_HEADER = config.h
 CONFIG_CLEAN_FILES = includes/sys/sdt-config.h \
-	initscript/config.systemtap initscript/config.stap-server \
-	initscript/systemtap initscript/stap-server \
+	initscript/config.stap-server initscript/stap-server \
+	initscript/stap-service-prepare initscript/stap-onboot \
+	initscript/stap@.service initscript/staprun@.service \
 	initscript/99stap/module-setup.sh initscript/99stap/install \
 	initscript/99stap/check run-stap dtrace \
 	java/org/systemtap/byteman/helper/HelperSDT.java \
@@ -159,7 +161,8 @@ CONFIG_CLEAN_VPATH_FILES =
 @BUILD_TRANSLATOR_TRUE@@BUILD_VIRT_TRUE@am__EXEEXT_2 =  \
 @BUILD_TRANSLATOR_TRUE@@BUILD_VIRT_TRUE@	stapvirt$(EXEEXT)
 am__installdirs = "$(DESTDIR)$(bindir)" "$(DESTDIR)$(pkglibexecdir)" \
-	"$(DESTDIR)$(bindir)" "$(DESTDIR)$(pkglibexecdir)" \
+	"$(DESTDIR)$(bindir)" "$(DESTDIR)$(bindir)" \
+	"$(DESTDIR)$(pkglibexecdir)" "$(DESTDIR)$(pkglibexecdir)" \
 	"$(DESTDIR)$(oldincludedir)"
 @BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@am__EXEEXT_3 = stap-sign-module$(EXEEXT) \
 @BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@	stap-authorize-cert$(EXEEXT)
@@ -187,6 +190,7 @@ am__dirstamp = $(am__leading_dot)dirstamp
 @BUILD_TRANSLATOR_TRUE@	stap-elaborate.$(OBJEXT) \
 @BUILD_TRANSLATOR_TRUE@	stap-translate.$(OBJEXT) \
 @BUILD_TRANSLATOR_TRUE@	stap-tapsets.$(OBJEXT) \
+@BUILD_TRANSLATOR_TRUE@	stap-tracepoint-vmlinux.$(OBJEXT) \
 @BUILD_TRANSLATOR_TRUE@	stap-buildrun.$(OBJEXT) \
 @BUILD_TRANSLATOR_TRUE@	stap-loc2stap.$(OBJEXT) \
 @BUILD_TRANSLATOR_TRUE@	stap-hash.$(OBJEXT) \
@@ -200,7 +204,6 @@ am__dirstamp = $(am__leading_dot)dirstamp
 @BUILD_TRANSLATOR_TRUE@	stap-tapset-timers.$(OBJEXT) \
 @BUILD_TRANSLATOR_TRUE@	stap-tapset-netfilter.$(OBJEXT) \
 @BUILD_TRANSLATOR_TRUE@	stap-tapset-perfmon.$(OBJEXT) \
-@BUILD_TRANSLATOR_TRUE@	stap-tapset-mark.$(OBJEXT) \
 @BUILD_TRANSLATOR_TRUE@	stap-tapset-utrace.$(OBJEXT) \
 @BUILD_TRANSLATOR_TRUE@	stap-task_finder.$(OBJEXT) \
 @BUILD_TRANSLATOR_TRUE@	stap-dwflpp.$(OBJEXT) \
@@ -304,7 +307,8 @@ am__uninstall_files_from_dir = { \
   || { echo " ( cd '$$dir' && rm -f" $$files ")"; \
        $(am__cd) "$$dir" && echo $$files | $(am__xargs_n) 40 $(am__rm_f); }; \
   }
-SCRIPTS = $(bin_SCRIPTS) $(pkglibexec_SCRIPTS)
+SCRIPTS = $(bin_SCRIPTS) $(nodist_bin_SCRIPTS) \
+	$(nodist_pkglibexec_SCRIPTS) $(pkglibexec_SCRIPTS)
 AM_V_P = $(am__v_P_@AM_V@)
 am__v_P_ = $(am__v_P_@AM_DEFAULT_V@)
 am__v_P_0 = false
@@ -344,7 +348,6 @@ am__depfiles_remade = ./$(DEPDIR)/stap-analysis.Po \
 	./$(DEPDIR)/stap-tapset-been.Po \
 	./$(DEPDIR)/stap-tapset-debuginfod.Po \
 	./$(DEPDIR)/stap-tapset-dynprobe.Po \
-	./$(DEPDIR)/stap-tapset-mark.Po \
 	./$(DEPDIR)/stap-tapset-method.Po \
 	./$(DEPDIR)/stap-tapset-netfilter.Po \
 	./$(DEPDIR)/stap-tapset-perfmon.Po \
@@ -352,7 +355,9 @@ am__depfiles_remade = ./$(DEPDIR)/stap-analysis.Po \
 	./$(DEPDIR)/stap-tapset-python.Po \
 	./$(DEPDIR)/stap-tapset-timers.Po \
 	./$(DEPDIR)/stap-tapset-utrace.Po ./$(DEPDIR)/stap-tapsets.Po \
-	./$(DEPDIR)/stap-task_finder.Po ./$(DEPDIR)/stap-translate.Po \
+	./$(DEPDIR)/stap-task_finder.Po \
+	./$(DEPDIR)/stap-tracepoint-vmlinux.Po \
+	./$(DEPDIR)/stap-translate.Po \
 	./$(DEPDIR)/stap-translator-output.Po \
 	./$(DEPDIR)/stap_authorize_cert-nsscommon.Po \
 	./$(DEPDIR)/stap_authorize_cert-stap-authorize-cert.Po \
@@ -524,21 +529,15 @@ PKG_CONFIG = @PKG_CONFIG@
 PKG_CONFIG_LIBDIR = @PKG_CONFIG_LIBDIR@
 PKG_CONFIG_PATH = @PKG_CONFIG_PATH@
 POSUB = @POSUB@
-PYTHON = @PYTHON@
 PYTHON3 = @PYTHON3@
 PYTHON3_CONFIG = @PYTHON3_CONFIG@
 PYTHON3_CPPFLAGS = @PYTHON3_CPPFLAGS@
 PYTHON3_EXEC_PREFIX = @PYTHON3_EXEC_PREFIX@
+PYTHON3_LIBPYTHON = @PYTHON3_LIBPYTHON@
+PYTHON3_MINOR = @PYTHON3_MINOR@
 PYTHON3_PLATFORM = @PYTHON3_PLATFORM@
 PYTHON3_PREFIX = @PYTHON3_PREFIX@
 PYTHON3_VERSION = @PYTHON3_VERSION@
-PYTHON_CONFIG = @PYTHON_CONFIG@
-PYTHON_CPPFLAGS = @PYTHON_CPPFLAGS@
-PYTHON_EXEC_PREFIX = @PYTHON_EXEC_PREFIX@
-PYTHON_PLATFORM = @PYTHON_PLATFORM@
-PYTHON_PREFIX = @PYTHON_PREFIX@
-PYTHON_UNKNOWN = @PYTHON_UNKNOWN@
-PYTHON_VERSION = @PYTHON_VERSION@
 RANLIB = @RANLIB@
 READLINE_LIBS = @READLINE_LIBS@
 SED = @SED@
@@ -549,6 +548,7 @@ STAP_PREFIX = @STAP_PREFIX@
 STRIP = @STRIP@
 USE_NLS = @USE_NLS@
 VERSION = @VERSION@
+WNO_TEMPLATE_BODY = @WNO_TEMPLATE_BODY@
 XGETTEXT = @XGETTEXT@
 XGETTEXT_015 = @XGETTEXT_015@
 XGETTEXT_EXTRA_OPTIONS = @XGETTEXT_EXTRA_OPTIONS@
@@ -603,6 +603,8 @@ infodir = @infodir@
 install_sh = @install_sh@
 jsonc_CFLAGS = @jsonc_CFLAGS@
 jsonc_LIBS = @jsonc_LIBS@
+libbpf_CFLAGS = @libbpf_CFLAGS@
+libbpf_LIBS = @libbpf_LIBS@
 libdir = @libdir@
 libexecdir = @libexecdir@
 libvirt_CFLAGS = @libvirt_CFLAGS@
@@ -621,16 +623,12 @@ oldincludedir = ${includedir}/sys
 openssl_CFLAGS = @openssl_CFLAGS@
 openssl_LIBS = @openssl_LIBS@
 pdfdir = @pdfdir@
-pkgpyexecdir = @pkgpyexecdir@
-pkgpythondir = @pkgpythondir@
 preferred_python = @preferred_python@
 prefix = @prefix@
 program_transform_name = @program_transform_name@
 psdir = @psdir@
 py3execdir = @py3execdir@
-pyexecdir = @pyexecdir@
 python3dir = @python3dir@
-pythondir = @pythondir@
 runstatedir = @runstatedir@
 sbindir = @sbindir@
 selinux_CFLAGS = @selinux_CFLAGS@
@@ -670,38 +668,40 @@ AM_CPPFLAGS = -DBINDIR='"$(bindir)"' \
 
 AM_CFLAGS = -D_GNU_SOURCE -fexceptions -Wall -Wextra -Wunused \
 	-Wformat=2 -W $(am__append_1)
-AM_CXXFLAGS = -Wall -Wextra $(am__append_2)
+AM_CXXFLAGS = -Wall -Wextra $(am__append_2) $(am__append_3)
 bin_SCRIPTS = stap-report stap-profile-annotate stap-prep \
-	$(am__append_4) $(am__append_7)
-pkglibexec_SCRIPTS = stap-env $(am__append_8)
+	$(am__append_5) $(am__append_8)
+nodist_bin_SCRIPTS = initscript/stap-onboot
+pkglibexec_SCRIPTS = stap-env $(am__append_9)
+nodist_pkglibexec_SCRIPTS = initscript/stap-service-prepare
 oldinclude_HEADERS = includes/sys/sdt.h includes/sys/sdt-config.h
 @BUILD_TRANSLATOR_TRUE@stap_SOURCES = main.cxx session.cxx parse.cxx \
 @BUILD_TRANSLATOR_TRUE@	staptree.cxx elaborate.cxx \
-@BUILD_TRANSLATOR_TRUE@	translate.cxx tapsets.cxx buildrun.cxx \
+@BUILD_TRANSLATOR_TRUE@	translate.cxx tapsets.cxx \
+@BUILD_TRANSLATOR_TRUE@	tracepoint-vmlinux.cxx buildrun.cxx \
 @BUILD_TRANSLATOR_TRUE@	loc2stap.cxx hash.cxx mdfour.c \
 @BUILD_TRANSLATOR_TRUE@	cache.cxx staputil.cxx coveragedb.cxx \
 @BUILD_TRANSLATOR_TRUE@	dwarf_wrappers.cxx tapset-been.cxx \
 @BUILD_TRANSLATOR_TRUE@	tapset-procfs.cxx tapset-timers.cxx \
 @BUILD_TRANSLATOR_TRUE@	tapset-netfilter.cxx tapset-perfmon.cxx \
-@BUILD_TRANSLATOR_TRUE@	tapset-mark.cxx tapset-utrace.cxx \
-@BUILD_TRANSLATOR_TRUE@	task_finder.cxx dwflpp.cxx \
-@BUILD_TRANSLATOR_TRUE@	rpm_finder.cxx setupdwfl.cxx remote.cxx \
-@BUILD_TRANSLATOR_TRUE@	privilege.cxx cmdline.cxx \
+@BUILD_TRANSLATOR_TRUE@	tapset-utrace.cxx task_finder.cxx \
+@BUILD_TRANSLATOR_TRUE@	dwflpp.cxx rpm_finder.cxx setupdwfl.cxx \
+@BUILD_TRANSLATOR_TRUE@	remote.cxx privilege.cxx cmdline.cxx \
 @BUILD_TRANSLATOR_TRUE@	tapset-dynprobe.cxx tapset-method.cxx \
 @BUILD_TRANSLATOR_TRUE@	translator-output.cxx stapregex.cxx \
 @BUILD_TRANSLATOR_TRUE@	stapregex-tree.cxx stapregex-parse.cxx \
 @BUILD_TRANSLATOR_TRUE@	stapregex-dfa.cxx stringtable.cxx \
 @BUILD_TRANSLATOR_TRUE@	tapset-python.cxx tapset-debuginfod.cxx \
-@BUILD_TRANSLATOR_TRUE@	analysis.cxx $(am__append_9) \
-@BUILD_TRANSLATOR_TRUE@	$(am__append_10) $(am__append_13) \
-@BUILD_TRANSLATOR_TRUE@	$(am__append_19) $(am__append_20)
+@BUILD_TRANSLATOR_TRUE@	analysis.cxx $(am__append_10) \
+@BUILD_TRANSLATOR_TRUE@	$(am__append_11) $(am__append_14) \
+@BUILD_TRANSLATOR_TRUE@	$(am__append_20) $(am__append_21)
 @BUILD_TRANSLATOR_TRUE@noinst_HEADERS = sdt_types.h
 @BUILD_TRANSLATOR_TRUE@stap_LDADD = @stap_LIBS@ @sqlite3_LIBS@ \
 @BUILD_TRANSLATOR_TRUE@	@LIBINTL@ -lpthread \
 @BUILD_TRANSLATOR_TRUE@	@debuginfod_LDFLAGS@ @debuginfod_LIBS@ \
 @BUILD_TRANSLATOR_TRUE@	@DYNINST_LDFLAGS@ @DYNINST_LIBS@ \
-@BUILD_TRANSLATOR_TRUE@	$(am__append_11) $(am__append_12) \
-@BUILD_TRANSLATOR_TRUE@	$(am__append_18) $(am__append_24)
+@BUILD_TRANSLATOR_TRUE@	$(am__append_12) $(am__append_13) \
+@BUILD_TRANSLATOR_TRUE@	$(am__append_19) $(am__append_25)
 @BUILD_TRANSLATOR_TRUE@stap_DEPENDENCIES = 
 @BUILD_TRANSLATOR_TRUE@@BUILD_VIRT_TRUE@stapvirt_SOURCES = stapvirt.c
 @BUILD_TRANSLATOR_TRUE@@BUILD_VIRT_TRUE@stapvirt_CFLAGS =  \
@@ -710,6 +710,42 @@ oldinclude_HEADERS = includes/sys/sdt.h includes/sys/sdt-config.h
 @BUILD_TRANSLATOR_TRUE@@BUILD_VIRT_TRUE@	$(libxml2_CFLAGS)
 @BUILD_TRANSLATOR_TRUE@@BUILD_VIRT_TRUE@stapvirt_LDFLAGS = $(AM_LDFLAGS)
 @BUILD_TRANSLATOR_TRUE@@BUILD_VIRT_TRUE@stapvirt_LDADD = $(libvirt_LIBS) $(libxml2_LIBS)
+@HAVE_PYTHON3_PROBES_FALSE@TAPSET_PYTHON3_STP = 
+
+# Python tapset selection: at build time, copy exactly one
+# python3.NN.stp.candidate (chosen by the python version used to
+# build _HelperSDT.so) to tapset/python3.stp in the build tree and
+# install that file.  configure/Makefile also generate tapset/python3.stpm
+# with @define stap_python3_libpython for libpython @cast paths.
+# Source trees keep only .stp.candidate files per minor; build and install
+# trees have python3.stp plus the generated python3.stpm.  Each
+# .stp.candidate is free of cross-version @defined()/@choose_defined()
+# and can use real libpython DWARF types directly.
+#
+# VPATH / separate build directory note: python3.stp and python3.stpm are
+# the first tapset files generated under $(builddir)/tapset/ (all other
+# tapset/*.stp and *.stpm remain in $(srcdir)/tapset).  In-tree builds
+# (srcdir = builddir) are fine.  When srcdir != builddir, "make check"
+# still points SYSTEMTAP_TAPSET at $(srcdir)/tapset (see check-local
+# below), so the generated files are not visible there; run-stap.in has
+# the same limitation.  That does not affect "make check" for python3.exp
+# (installtest_p; needs installcheck + install tree) or normal use after
+# "make install".  To exercise python3 probes from a VPATH build tree
+# without installing, set SYSTEMTAP_TAPSET to $(builddir)/tapset and
+# supply the static tapsets too (e.g. stap -I $(srcdir)/tapset ...).
+@HAVE_PYTHON3_PROBES_TRUE@TAPSET_PYTHON3_STP = tapset/python3.stp
+@HAVE_PYTHON3_PROBES_FALSE@TAPSET_PYTHON3_STPM = 
+@HAVE_PYTHON3_PROBES_TRUE@TAPSET_PYTHON3_STPM = tapset/python3.stpm
+@HAVE_PYTHON3_PROBES_FALSE@TAPSET_PYTHON3_CANDIDATE = 
+@HAVE_PYTHON3_PROBES_TRUE@TAPSET_PYTHON3_CANDIDATE = tapset/python3.$(PYTHON3_MINOR).stp.candidate
+
+# The libpython path baked into python3.stpm is resolved at run time on the
+# machine being probed, so it has to be the installed location.  configure
+# gets PYTHON3_LIBPYTHON from sysconfig, whose LIBDIR points at the python
+# build/staging area; when cross compiling that is a build host directory
+# which does not exist on the target.  Keep only the library soname from
+# sysconfig and anchor it at the $(libdir) we are installing against.
+PYTHON3_LIBPYTHON_INSTALLED = $(libdir)/$(notdir $(PYTHON3_LIBPYTHON))
 
 # Arrange for git_version.h to be regenerated at every "make".
 # Code fragment is based upon RadeonHD.am.
@@ -722,16 +758,16 @@ oldinclude_HEADERS = includes/sys/sdt.h includes/sys/sdt-config.h
 BUILT_SOURCES = git_version.stamp
 CLEANFILES = git_version.h $(pkglibexec_PROGRAMS)
 GIT_VERSION_CMD = $(SHELL) $(top_srcdir)/git_version.sh
-PHONIES = $(am__append_25) runcheck update-po dist-gzip rpm srpm \
+PHONIES = $(am__append_26) runcheck update-po dist-gzip rpm srpm \
 	uprobes install-uprobes
 @BUILD_TRANSLATOR_TRUE@stap_CFLAGS = $(AM_CFLAGS) @PIECFLAGS@ \
-@BUILD_TRANSLATOR_TRUE@	$(am__append_21)
+@BUILD_TRANSLATOR_TRUE@	$(am__append_22)
 @BUILD_TRANSLATOR_TRUE@stap_CXXFLAGS = $(AM_CXXFLAGS) @PIECXXFLAGS@ \
 @BUILD_TRANSLATOR_TRUE@	@ALIGNEDNEW@ @debuginfod_CFLAGS@ \
-@BUILD_TRANSLATOR_TRUE@	$(am__append_15) $(am__append_16) \
-@BUILD_TRANSLATOR_TRUE@	$(am__append_22)
+@BUILD_TRANSLATOR_TRUE@	$(am__append_16) $(am__append_17) \
+@BUILD_TRANSLATOR_TRUE@	$(am__append_23)
 @BUILD_TRANSLATOR_TRUE@stap_CPPFLAGS = $(AM_CPPFLAGS) -DSTAP_SDT_V2 \
-@BUILD_TRANSLATOR_TRUE@	$(am__append_17) $(am__append_23)
+@BUILD_TRANSLATOR_TRUE@	$(am__append_18) $(am__append_24)
 @BUILD_TRANSLATOR_TRUE@stap_LDFLAGS = $(AM_LDFLAGS) @PIELDFLAGS@ @BOOST_SYSTEM_LIB@
 @BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@stap_sign_module_SOURCES = stap-sign-module.cxx nsscommon.cxx staputil.cxx
 @BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@stap_sign_module_CPPFLAGS = $(AM_CPPFLAGS)
@@ -750,17 +786,17 @@ PHONIES = $(am__append_25) runcheck update-po dist-gzip rpm srpm \
 @BUILD_SERVER_TRUE@@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@	@PIECXXFLAGS@ \
 @BUILD_SERVER_TRUE@@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@	$(nss_CFLAGS) \
 @BUILD_SERVER_TRUE@@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@	$(debuginfod_CFLAGS) \
-@BUILD_SERVER_TRUE@@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@	$(am__append_27)
+@BUILD_SERVER_TRUE@@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@	$(am__append_28)
 @BUILD_SERVER_TRUE@@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@stap_serverd_CFLAGS = $(AM_CFLAGS) \
 @BUILD_SERVER_TRUE@@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@	@PIECFLAGS@ \
 @BUILD_SERVER_TRUE@@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@	$(nss_CFLAGS) \
 @BUILD_SERVER_TRUE@@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@	$(debuginfod_CFLAGS) \
-@BUILD_SERVER_TRUE@@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@	$(am__append_26)
+@BUILD_SERVER_TRUE@@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@	$(am__append_27)
 @BUILD_SERVER_TRUE@@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@stap_serverd_LDFLAGS = $(AM_LDFLAGS) @PIELDFLAGS@ $(debuginfod_LDFLAGS)
 @BUILD_SERVER_TRUE@@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@stap_serverd_LDADD = $(nss_LIBS) \
 @BUILD_SERVER_TRUE@@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@	-lpthread \
 @BUILD_SERVER_TRUE@@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@	$(debuginfod_LIBS) \
-@BUILD_SERVER_TRUE@@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@	$(am__append_28)
+@BUILD_SERVER_TRUE@@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@	$(am__append_29)
 @BUILD_SERVER_TRUE@@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@stap_gen_cert_SOURCES = stap-gen-cert.cxx staputil.cxx nsscommon.cxx
 @BUILD_SERVER_TRUE@@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@stap_gen_cert_CXXFLAGS = $(AM_CXXFLAGS) @PIECXXFLAGS@ $(nss_CFLAGS) $(debuginfod_CFLAGS)
 @BUILD_SERVER_TRUE@@BUILD_TRANSLATOR_TRUE@@HAVE_NSS_TRUE@stap_gen_cert_CFLAGS = $(AM_CFLAGS) @PIECFLAGS@ $(nss_CFLAGS) $(debuginfod_CFLAGS)
@@ -778,7 +814,13 @@ TEST_COV_DIR = coverage
 SUBDIRS = . java python stapdyn staprun stapbpf doc man po stap-exporter interactive-notebook
 # NB: the gcov target above uses this to enumarate linked binaries' build directories
 DIST_SUBDIRS = testsuite $(SUBDIRS)
-EXTRA_DIST = m4/ChangeLog
+EXTRA_DIST = m4/ChangeLog \
+	tapset/python3.9.stp.candidate \
+	tapset/python3.12.stp.candidate \
+	tapset/python3.13.stp.candidate \
+	tapset/python3.14.stp.candidate \
+	tapset/python3.15.stp.candidate
+
 
 # Any extra flags, such as:
 #     --define "with_docs 0"
@@ -840,13 +882,17 @@ distclean-hdr:
 	-rm -f config.h stamp-h1
 includes/sys/sdt-config.h: $(top_builddir)/config.status $(top_srcdir)/includes/sys/sdt-config.h.in
 	cd $(top_builddir) && $(SHELL) ./config.status $@
-initscript/config.systemtap: $(top_builddir)/config.status $(top_srcdir)/initscript/config.systemtap.in
-	cd $(top_builddir) && $(SHELL) ./config.status $@
 initscript/config.stap-server: $(top_builddir)/config.status $(top_srcdir)/initscript/config.stap-server.in
 	cd $(top_builddir) && $(SHELL) ./config.status $@
-initscript/systemtap: $(top_builddir)/config.status $(top_srcdir)/initscript/systemtap.in
-	cd $(top_builddir) && $(SHELL) ./config.status $@
 initscript/stap-server: $(top_builddir)/config.status $(top_srcdir)/initscript/stap-server.in
+	cd $(top_builddir) && $(SHELL) ./config.status $@
+initscript/stap-service-prepare: $(top_builddir)/config.status $(top_srcdir)/initscript/stap-service-prepare.in
+	cd $(top_builddir) && $(SHELL) ./config.status $@
+initscript/stap-onboot: $(top_builddir)/config.status $(top_srcdir)/initscript/stap-onboot.in
+	cd $(top_builddir) && $(SHELL) ./config.status $@
+initscript/stap@.service: $(top_builddir)/config.status $(top_srcdir)/initscript/stap@.service.in
+	cd $(top_builddir) && $(SHELL) ./config.status $@
+initscript/staprun@.service: $(top_builddir)/config.status $(top_srcdir)/initscript/staprun@.service.in
 	cd $(top_builddir) && $(SHELL) ./config.status $@
 initscript/99stap/module-setup.sh: $(top_builddir)/config.status $(top_srcdir)/initscript/99stap/module-setup.sh.in
 	cd $(top_builddir) && $(SHELL) ./config.status $@
@@ -1026,6 +1072,76 @@ uninstall-binSCRIPTS:
 	files=`for p in $$list; do echo "$$p"; done | \
 	       sed -e 's,.*/,,;$(transform)'`; \
 	dir='$(DESTDIR)$(bindir)'; $(am__uninstall_files_from_dir)
+install-nodist_binSCRIPTS: $(nodist_bin_SCRIPTS)
+	@$(NORMAL_INSTALL)
+	@list='$(nodist_bin_SCRIPTS)'; test -n "$(bindir)" || list=; \
+	if test -n "$$list"; then \
+	  echo " $(MKDIR_P) '$(DESTDIR)$(bindir)'"; \
+	  $(MKDIR_P) "$(DESTDIR)$(bindir)" || exit 1; \
+	fi; \
+	for p in $$list; do \
+	  if test -f "$$p"; then d=; else d="$(srcdir)/"; fi; \
+	  if test -f "$$d$$p"; then echo "$$d$$p"; echo "$$p"; else :; fi; \
+	done | \
+	sed -e 'p;s,.*/,,;n' \
+	    -e 'h;s|.*|.|' \
+	    -e 'p;x;s,.*/,,;$(transform)' | sed 'N;N;N;s,\n, ,g' | \
+	$(AWK) 'BEGIN { files["."] = ""; dirs["."] = 1; } \
+	  { d=$$3; if (dirs[d] != 1) { print "d", d; dirs[d] = 1 } \
+	    if ($$2 == $$4) { files[d] = files[d] " " $$1; \
+	      if (++n[d] == $(am__install_max)) { \
+		print "f", d, files[d]; n[d] = 0; files[d] = "" } } \
+	    else { print "f", d "/" $$4, $$1 } } \
+	  END { for (d in files) print "f", d, files[d] }' | \
+	while read type dir files; do \
+	     if test "$$dir" = .; then dir=; else dir=/$$dir; fi; \
+	     test -z "$$files" || { \
+	       echo " $(INSTALL_SCRIPT) $$files '$(DESTDIR)$(bindir)$$dir'"; \
+	       $(INSTALL_SCRIPT) $$files "$(DESTDIR)$(bindir)$$dir" || exit $$?; \
+	     } \
+	; done
+
+uninstall-nodist_binSCRIPTS:
+	@$(NORMAL_UNINSTALL)
+	@list='$(nodist_bin_SCRIPTS)'; test -n "$(bindir)" || exit 0; \
+	files=`for p in $$list; do echo "$$p"; done | \
+	       sed -e 's,.*/,,;$(transform)'`; \
+	dir='$(DESTDIR)$(bindir)'; $(am__uninstall_files_from_dir)
+install-nodist_pkglibexecSCRIPTS: $(nodist_pkglibexec_SCRIPTS)
+	@$(NORMAL_INSTALL)
+	@list='$(nodist_pkglibexec_SCRIPTS)'; test -n "$(pkglibexecdir)" || list=; \
+	if test -n "$$list"; then \
+	  echo " $(MKDIR_P) '$(DESTDIR)$(pkglibexecdir)'"; \
+	  $(MKDIR_P) "$(DESTDIR)$(pkglibexecdir)" || exit 1; \
+	fi; \
+	for p in $$list; do \
+	  if test -f "$$p"; then d=; else d="$(srcdir)/"; fi; \
+	  if test -f "$$d$$p"; then echo "$$d$$p"; echo "$$p"; else :; fi; \
+	done | \
+	sed -e 'p;s,.*/,,;n' \
+	    -e 'h;s|.*|.|' \
+	    -e 'p;x;s,.*/,,;$(transform)' | sed 'N;N;N;s,\n, ,g' | \
+	$(AWK) 'BEGIN { files["."] = ""; dirs["."] = 1; } \
+	  { d=$$3; if (dirs[d] != 1) { print "d", d; dirs[d] = 1 } \
+	    if ($$2 == $$4) { files[d] = files[d] " " $$1; \
+	      if (++n[d] == $(am__install_max)) { \
+		print "f", d, files[d]; n[d] = 0; files[d] = "" } } \
+	    else { print "f", d "/" $$4, $$1 } } \
+	  END { for (d in files) print "f", d, files[d] }' | \
+	while read type dir files; do \
+	     if test "$$dir" = .; then dir=; else dir=/$$dir; fi; \
+	     test -z "$$files" || { \
+	       echo " $(INSTALL_SCRIPT) $$files '$(DESTDIR)$(pkglibexecdir)$$dir'"; \
+	       $(INSTALL_SCRIPT) $$files "$(DESTDIR)$(pkglibexecdir)$$dir" || exit $$?; \
+	     } \
+	; done
+
+uninstall-nodist_pkglibexecSCRIPTS:
+	@$(NORMAL_UNINSTALL)
+	@list='$(nodist_pkglibexec_SCRIPTS)'; test -n "$(pkglibexecdir)" || exit 0; \
+	files=`for p in $$list; do echo "$$p"; done | \
+	       sed -e 's,.*/,,;$(transform)'`; \
+	dir='$(DESTDIR)$(pkglibexecdir)'; $(am__uninstall_files_from_dir)
 install-pkglibexecSCRIPTS: $(pkglibexec_SCRIPTS)
 	@$(NORMAL_INSTALL)
 	@list='$(pkglibexec_SCRIPTS)'; test -n "$(pkglibexecdir)" || list=; \
@@ -1107,7 +1223,6 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/stap-tapset-been.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/stap-tapset-debuginfod.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/stap-tapset-dynprobe.Po@am__quote@ # am--include-marker
-@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/stap-tapset-mark.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/stap-tapset-method.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/stap-tapset-netfilter.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/stap-tapset-perfmon.Po@am__quote@ # am--include-marker
@@ -1117,6 +1232,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/stap-tapset-utrace.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/stap-tapsets.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/stap-task_finder.Po@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/stap-tracepoint-vmlinux.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/stap-translate.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/stap-translator-output.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/stap_authorize_cert-nsscommon.Po@am__quote@ # am--include-marker
@@ -1303,6 +1419,20 @@ stap-tapsets.obj: tapsets.cxx
 @AMDEP_TRUE@@am__fastdepCXX_FALSE@	DEPDIR=$(DEPDIR) $(CXXDEPMODE) $(depcomp) @AMDEPBACKSLASH@
 @am__fastdepCXX_FALSE@	$(AM_V_CXX@am__nodep@)$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(stap_CPPFLAGS) $(CPPFLAGS) $(stap_CXXFLAGS) $(CXXFLAGS) -c -o stap-tapsets.obj `if test -f 'tapsets.cxx'; then $(CYGPATH_W) 'tapsets.cxx'; else $(CYGPATH_W) '$(srcdir)/tapsets.cxx'; fi`
 
+stap-tracepoint-vmlinux.o: tracepoint-vmlinux.cxx
+@am__fastdepCXX_TRUE@	$(AM_V_CXX)$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(stap_CPPFLAGS) $(CPPFLAGS) $(stap_CXXFLAGS) $(CXXFLAGS) -MT stap-tracepoint-vmlinux.o -MD -MP -MF $(DEPDIR)/stap-tracepoint-vmlinux.Tpo -c -o stap-tracepoint-vmlinux.o `test -f 'tracepoint-vmlinux.cxx' || echo '$(srcdir)/'`tracepoint-vmlinux.cxx
+@am__fastdepCXX_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/stap-tracepoint-vmlinux.Tpo $(DEPDIR)/stap-tracepoint-vmlinux.Po
+@AMDEP_TRUE@@am__fastdepCXX_FALSE@	$(AM_V_CXX)source='tracepoint-vmlinux.cxx' object='stap-tracepoint-vmlinux.o' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCXX_FALSE@	DEPDIR=$(DEPDIR) $(CXXDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCXX_FALSE@	$(AM_V_CXX@am__nodep@)$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(stap_CPPFLAGS) $(CPPFLAGS) $(stap_CXXFLAGS) $(CXXFLAGS) -c -o stap-tracepoint-vmlinux.o `test -f 'tracepoint-vmlinux.cxx' || echo '$(srcdir)/'`tracepoint-vmlinux.cxx
+
+stap-tracepoint-vmlinux.obj: tracepoint-vmlinux.cxx
+@am__fastdepCXX_TRUE@	$(AM_V_CXX)$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(stap_CPPFLAGS) $(CPPFLAGS) $(stap_CXXFLAGS) $(CXXFLAGS) -MT stap-tracepoint-vmlinux.obj -MD -MP -MF $(DEPDIR)/stap-tracepoint-vmlinux.Tpo -c -o stap-tracepoint-vmlinux.obj `if test -f 'tracepoint-vmlinux.cxx'; then $(CYGPATH_W) 'tracepoint-vmlinux.cxx'; else $(CYGPATH_W) '$(srcdir)/tracepoint-vmlinux.cxx'; fi`
+@am__fastdepCXX_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/stap-tracepoint-vmlinux.Tpo $(DEPDIR)/stap-tracepoint-vmlinux.Po
+@AMDEP_TRUE@@am__fastdepCXX_FALSE@	$(AM_V_CXX)source='tracepoint-vmlinux.cxx' object='stap-tracepoint-vmlinux.obj' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCXX_FALSE@	DEPDIR=$(DEPDIR) $(CXXDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCXX_FALSE@	$(AM_V_CXX@am__nodep@)$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(stap_CPPFLAGS) $(CPPFLAGS) $(stap_CXXFLAGS) $(CXXFLAGS) -c -o stap-tracepoint-vmlinux.obj `if test -f 'tracepoint-vmlinux.cxx'; then $(CYGPATH_W) 'tracepoint-vmlinux.cxx'; else $(CYGPATH_W) '$(srcdir)/tracepoint-vmlinux.cxx'; fi`
+
 stap-buildrun.o: buildrun.cxx
 @am__fastdepCXX_TRUE@	$(AM_V_CXX)$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(stap_CPPFLAGS) $(CPPFLAGS) $(stap_CXXFLAGS) $(CXXFLAGS) -MT stap-buildrun.o -MD -MP -MF $(DEPDIR)/stap-buildrun.Tpo -c -o stap-buildrun.o `test -f 'buildrun.cxx' || echo '$(srcdir)/'`buildrun.cxx
 @am__fastdepCXX_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/stap-buildrun.Tpo $(DEPDIR)/stap-buildrun.Po
@@ -1470,20 +1600,6 @@ stap-tapset-perfmon.obj: tapset-perfmon.cxx
 @AMDEP_TRUE@@am__fastdepCXX_FALSE@	$(AM_V_CXX)source='tapset-perfmon.cxx' object='stap-tapset-perfmon.obj' libtool=no @AMDEPBACKSLASH@
 @AMDEP_TRUE@@am__fastdepCXX_FALSE@	DEPDIR=$(DEPDIR) $(CXXDEPMODE) $(depcomp) @AMDEPBACKSLASH@
 @am__fastdepCXX_FALSE@	$(AM_V_CXX@am__nodep@)$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(stap_CPPFLAGS) $(CPPFLAGS) $(stap_CXXFLAGS) $(CXXFLAGS) -c -o stap-tapset-perfmon.obj `if test -f 'tapset-perfmon.cxx'; then $(CYGPATH_W) 'tapset-perfmon.cxx'; else $(CYGPATH_W) '$(srcdir)/tapset-perfmon.cxx'; fi`
-
-stap-tapset-mark.o: tapset-mark.cxx
-@am__fastdepCXX_TRUE@	$(AM_V_CXX)$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(stap_CPPFLAGS) $(CPPFLAGS) $(stap_CXXFLAGS) $(CXXFLAGS) -MT stap-tapset-mark.o -MD -MP -MF $(DEPDIR)/stap-tapset-mark.Tpo -c -o stap-tapset-mark.o `test -f 'tapset-mark.cxx' || echo '$(srcdir)/'`tapset-mark.cxx
-@am__fastdepCXX_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/stap-tapset-mark.Tpo $(DEPDIR)/stap-tapset-mark.Po
-@AMDEP_TRUE@@am__fastdepCXX_FALSE@	$(AM_V_CXX)source='tapset-mark.cxx' object='stap-tapset-mark.o' libtool=no @AMDEPBACKSLASH@
-@AMDEP_TRUE@@am__fastdepCXX_FALSE@	DEPDIR=$(DEPDIR) $(CXXDEPMODE) $(depcomp) @AMDEPBACKSLASH@
-@am__fastdepCXX_FALSE@	$(AM_V_CXX@am__nodep@)$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(stap_CPPFLAGS) $(CPPFLAGS) $(stap_CXXFLAGS) $(CXXFLAGS) -c -o stap-tapset-mark.o `test -f 'tapset-mark.cxx' || echo '$(srcdir)/'`tapset-mark.cxx
-
-stap-tapset-mark.obj: tapset-mark.cxx
-@am__fastdepCXX_TRUE@	$(AM_V_CXX)$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(stap_CPPFLAGS) $(CPPFLAGS) $(stap_CXXFLAGS) $(CXXFLAGS) -MT stap-tapset-mark.obj -MD -MP -MF $(DEPDIR)/stap-tapset-mark.Tpo -c -o stap-tapset-mark.obj `if test -f 'tapset-mark.cxx'; then $(CYGPATH_W) 'tapset-mark.cxx'; else $(CYGPATH_W) '$(srcdir)/tapset-mark.cxx'; fi`
-@am__fastdepCXX_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/stap-tapset-mark.Tpo $(DEPDIR)/stap-tapset-mark.Po
-@AMDEP_TRUE@@am__fastdepCXX_FALSE@	$(AM_V_CXX)source='tapset-mark.cxx' object='stap-tapset-mark.obj' libtool=no @AMDEPBACKSLASH@
-@AMDEP_TRUE@@am__fastdepCXX_FALSE@	DEPDIR=$(DEPDIR) $(CXXDEPMODE) $(depcomp) @AMDEPBACKSLASH@
-@am__fastdepCXX_FALSE@	$(AM_V_CXX@am__nodep@)$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(stap_CPPFLAGS) $(CPPFLAGS) $(stap_CXXFLAGS) $(CXXFLAGS) -c -o stap-tapset-mark.obj `if test -f 'tapset-mark.cxx'; then $(CYGPATH_W) 'tapset-mark.cxx'; else $(CYGPATH_W) '$(srcdir)/tapset-mark.cxx'; fi`
 
 stap-tapset-utrace.o: tapset-utrace.cxx
 @am__fastdepCXX_TRUE@	$(AM_V_CXX)$(CXX) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(stap_CPPFLAGS) $(CPPFLAGS) $(stap_CXXFLAGS) $(CXXFLAGS) -MT stap-tapset-utrace.o -MD -MP -MF $(DEPDIR)/stap-tapset-utrace.Tpo -c -o stap-tapset-utrace.o `test -f 'tapset-utrace.cxx' || echo '$(srcdir)/'`tapset-utrace.cxx
@@ -2273,7 +2389,7 @@ check: $(BUILT_SOURCES)
 all-am: Makefile $(PROGRAMS) $(SCRIPTS) $(HEADERS) config.h all-local
 installdirs: installdirs-recursive
 installdirs-am:
-	for dir in "$(DESTDIR)$(bindir)" "$(DESTDIR)$(pkglibexecdir)" "$(DESTDIR)$(bindir)" "$(DESTDIR)$(pkglibexecdir)" "$(DESTDIR)$(oldincludedir)"; do \
+	for dir in "$(DESTDIR)$(bindir)" "$(DESTDIR)$(pkglibexecdir)" "$(DESTDIR)$(bindir)" "$(DESTDIR)$(bindir)" "$(DESTDIR)$(pkglibexecdir)" "$(DESTDIR)$(pkglibexecdir)" "$(DESTDIR)$(oldincludedir)"; do \
 	  test -z "$$dir" || $(MKDIR_P) "$$dir"; \
 	done
 install-exec: $(BUILT_SOURCES)
@@ -2355,7 +2471,6 @@ distclean: distclean-recursive
 	-rm -f ./$(DEPDIR)/stap-tapset-been.Po
 	-rm -f ./$(DEPDIR)/stap-tapset-debuginfod.Po
 	-rm -f ./$(DEPDIR)/stap-tapset-dynprobe.Po
-	-rm -f ./$(DEPDIR)/stap-tapset-mark.Po
 	-rm -f ./$(DEPDIR)/stap-tapset-method.Po
 	-rm -f ./$(DEPDIR)/stap-tapset-netfilter.Po
 	-rm -f ./$(DEPDIR)/stap-tapset-perfmon.Po
@@ -2365,6 +2480,7 @@ distclean: distclean-recursive
 	-rm -f ./$(DEPDIR)/stap-tapset-utrace.Po
 	-rm -f ./$(DEPDIR)/stap-tapsets.Po
 	-rm -f ./$(DEPDIR)/stap-task_finder.Po
+	-rm -f ./$(DEPDIR)/stap-tracepoint-vmlinux.Po
 	-rm -f ./$(DEPDIR)/stap-translate.Po
 	-rm -f ./$(DEPDIR)/stap-translator-output.Po
 	-rm -f ./$(DEPDIR)/stap_authorize_cert-nsscommon.Po
@@ -2409,7 +2525,8 @@ install-dvi: install-dvi-recursive
 install-dvi-am:
 
 install-exec-am: install-binPROGRAMS install-binSCRIPTS \
-	install-exec-local install-pkglibexecPROGRAMS \
+	install-exec-local install-nodist_binSCRIPTS \
+	install-nodist_pkglibexecSCRIPTS install-pkglibexecPROGRAMS \
 	install-pkglibexecSCRIPTS
 
 install-html: install-html-recursive
@@ -2473,7 +2590,6 @@ maintainer-clean: maintainer-clean-recursive
 	-rm -f ./$(DEPDIR)/stap-tapset-been.Po
 	-rm -f ./$(DEPDIR)/stap-tapset-debuginfod.Po
 	-rm -f ./$(DEPDIR)/stap-tapset-dynprobe.Po
-	-rm -f ./$(DEPDIR)/stap-tapset-mark.Po
 	-rm -f ./$(DEPDIR)/stap-tapset-method.Po
 	-rm -f ./$(DEPDIR)/stap-tapset-netfilter.Po
 	-rm -f ./$(DEPDIR)/stap-tapset-perfmon.Po
@@ -2483,6 +2599,7 @@ maintainer-clean: maintainer-clean-recursive
 	-rm -f ./$(DEPDIR)/stap-tapset-utrace.Po
 	-rm -f ./$(DEPDIR)/stap-tapsets.Po
 	-rm -f ./$(DEPDIR)/stap-task_finder.Po
+	-rm -f ./$(DEPDIR)/stap-tracepoint-vmlinux.Po
 	-rm -f ./$(DEPDIR)/stap-translate.Po
 	-rm -f ./$(DEPDIR)/stap-translator-output.Po
 	-rm -f ./$(DEPDIR)/stap_authorize_cert-nsscommon.Po
@@ -2520,7 +2637,8 @@ ps: ps-recursive
 ps-am:
 
 uninstall-am: uninstall-binPROGRAMS uninstall-binSCRIPTS \
-	uninstall-local uninstall-oldincludeHEADERS \
+	uninstall-local uninstall-nodist_binSCRIPTS \
+	uninstall-nodist_pkglibexecSCRIPTS uninstall-oldincludeHEADERS \
 	uninstall-pkglibexecPROGRAMS uninstall-pkglibexecSCRIPTS
 
 .MAKE: $(am__recursive_targets) all check check-am install install-am \
@@ -2537,6 +2655,7 @@ uninstall-am: uninstall-binPROGRAMS uninstall-binSCRIPTS \
 	install-data-local install-dvi install-dvi-am install-exec \
 	install-exec-am install-exec-local install-html \
 	install-html-am install-info install-info-am install-man \
+	install-nodist_binSCRIPTS install-nodist_pkglibexecSCRIPTS \
 	install-oldincludeHEADERS install-pdf install-pdf-am \
 	install-pkglibexecPROGRAMS install-pkglibexecSCRIPTS \
 	install-ps install-ps-am install-strip installcheck \
@@ -2544,7 +2663,8 @@ uninstall-am: uninstall-binPROGRAMS uninstall-binSCRIPTS \
 	maintainer-clean-generic mostlyclean mostlyclean-compile \
 	mostlyclean-generic pdf pdf-am ps ps-am tags tags-am uninstall \
 	uninstall-am uninstall-binPROGRAMS uninstall-binSCRIPTS \
-	uninstall-local uninstall-oldincludeHEADERS \
+	uninstall-local uninstall-nodist_binSCRIPTS \
+	uninstall-nodist_pkglibexecSCRIPTS uninstall-oldincludeHEADERS \
 	uninstall-pkglibexecPROGRAMS uninstall-pkglibexecSCRIPTS
 
 .PRECIOUS: Makefile
@@ -2554,6 +2674,16 @@ all: macros.systemtap
 
 macros.systemtap: $(srcdir)/macros.systemtap.in
 	sed -e "s#@pkgdatadir@#$(pkgdatadir)#g" < $< > $@
+
+@HAVE_PYTHON3_PROBES_TRUE@all-local: $(TAPSET_PYTHON3_STP) $(TAPSET_PYTHON3_STPM)
+
+$(TAPSET_PYTHON3_STP): $(srcdir)/$(TAPSET_PYTHON3_CANDIDATE)
+	mkdir -p tapset # create build-tree tapset/ dir if needed
+	cp $< $@
+
+$(TAPSET_PYTHON3_STPM):
+	mkdir -p tapset # create build-tree tapset/ dir if needed
+	@echo '@define stap_python3_libpython %("$(PYTHON3_LIBPYTHON_INSTALLED)" %)' > $@
 
 install: all
 	$(MAKE) $(AM_MAKEFLAGS) install-recursive
@@ -2595,11 +2725,11 @@ cscope:
 @BUILD_CRASHMOD_TRUE@$(STAPLOG): staplog.c
 @BUILD_CRASHMOD_TRUE@	$(CC) $(staplog_CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -shared -rdynamic \
 @BUILD_CRASHMOD_TRUE@		$(AM_LDFLAGS) $(LDFLAGS) -fPIC -o $@ $<
-@BUILD_CRASHMOD_TRUE@all-local: $(STAPLOG) example_index
+@BUILD_CRASHMOD_TRUE@all-local: $(STAPLOG) example_index $(TAPSET_PYTHON3_STP)
 @BUILD_CRASHMOD_TRUE@install-exec-local: $(STAPLOG)
 @BUILD_CRASHMOD_TRUE@	$(MKDIR_P) $(DESTDIR)$(pkglibdir)
 @BUILD_CRASHMOD_TRUE@	$(INSTALL) $(STAPLOG) $(DESTDIR)$(pkglibdir)
-@BUILD_CRASHMOD_FALSE@all-local: example_index
+@BUILD_CRASHMOD_FALSE@all-local: example_index $(TAPSET_PYTHON3_STP)
 
 example_index: $(EXAMPLE_SOURCE_DIR)/index.html
 
@@ -2621,8 +2751,25 @@ install-data-local:
 		do $(INSTALL_DATA) -D $$f $(DESTDIR)$(pkgdatadir)/runtime/softfloat/$$f; done)
 	(cd $(srcdir)/runtime/linux; for f in *.[ch]; \
 		do $(INSTALL_DATA) -D $$f $(DESTDIR)$(pkgdatadir)/runtime/linux/$$f; done)
-	(cd $(srcdir)/tapset; find . \( -name '*.stp' -o -name '*.stpm' -o -name README \) -print \
+	(cd $(srcdir)/tapset; find . \( -name '*.stpm' -o -name README \) -print \
 		| while read f; do $(INSTALL_DATA) -D $$f $(DESTDIR)$(pkgdatadir)/tapset/$$f; done)
+	(cd $(srcdir)/tapset; find . -name '*.stp' ! -name 'python3*.stp' -print \
+		| while read f; do $(INSTALL_DATA) -D $$f $(DESTDIR)$(pkgdatadir)/tapset/$$f; done)
+	if test -n "$(TAPSET_PYTHON3_STPM)" && test -f "$(TAPSET_PYTHON3_STPM)"; then \
+	  $(INSTALL_DATA) -D "$(TAPSET_PYTHON3_STPM)" \
+	    "$(DESTDIR)$(pkgdatadir)/tapset/python3.stpm"; \
+	fi
+	if test -n "$(TAPSET_PYTHON3_STP)" && test -f "$(TAPSET_PYTHON3_STP)"; then \
+	  $(INSTALL_DATA) -D "$(TAPSET_PYTHON3_STP)" \
+	    "$(DESTDIR)$(pkgdatadir)/tapset/python3.stp"; \
+	fi
+# Prune stale versioned python3.NN.stp left by older installs.
+	-for f in $(DESTDIR)$(pkgdatadir)/tapset/python3*.stp; do \
+	  if test -f "$$f"; then \
+	    case $$f in */python3.stp) ;; *) rm -f "$$f";; esac; \
+	  fi; \
+	done
+	rm -f $(DESTDIR)$(pkgdatadir)/tapset/python2.stp
 	(cd $(srcdir)/testsuite/systemtap.examples; find . -type f -print \
 		| grep -E -v 'check.exp|ChangeLog|examples-index-gen.pl|html/.*\.tmpl|metadatabase.dbq$$' \
 		| while read f; do if test -x $$f; then \
@@ -2648,6 +2795,7 @@ clean-local:
 	rm -rf $(TEST_COV_DIR)
 	rm -rf stap.info
 	rm -rf staplog.so
+	rm -f tapset/python3.stp tapset/python3.stpm
 
 distclean-local:
 	rm -f doc/beginners/en-US doc/beginners/build/en-US/testsuite
@@ -2673,7 +2821,14 @@ uninstall-local:
 @BUILD_SERVER_TRUE@	rm -rf $(DESTDIR)$(localstatedir)/run/stap-server
 @BUILD_SERVER_TRUE@	rm -f $(DESTDIR)$(localstatedir)/log/stap-server/log
 
+# Ensure no build-generated python3.stp / python3.stpm sneak into a source tarball.
+dist-hook:
+	rm -f $(distdir)/tapset/python3.stp $(distdir)/tapset/python3.stpm
+
 check-local:
+# SYSTEMTAP_TAPSET uses $(srcdir)/tapset (static tapsets only).  Build-generated
+# tapset/python3.stp and python3.stpm live in $(builddir)/tapset when srcdir !=
+# builddir; see the python tapset comment above.
 	SRCDIR=`cd $(srcdir); pwd`; \
         PWD=`pwd`; \
 	$(MAKE) -C testsuite check SYSTEMTAP_RUNTIME=$$SRCDIR/runtime SYSTEMTAP_TAPSET=$$SRCDIR/tapset LD_LIBRARY_PATH=$$LD_LIBRARY_PATH$${LD_LIBRARY_PATH:+:}$$PWD/lib-elfutils:$$PWD/lib-elfutils/systemtap SYSTEMTAP_PATH=$$PWD SYSTEMTAP_INCLUDES=$$PWD/includes RUNTESTFLAGS="$(RUNTESTFLAGS)" PKGLIBDIR="$(pkglibexecdir)";
@@ -2736,12 +2891,6 @@ update-po:
 	@echo if systemtam.pot is shown as modified ...
 	@echo
 	(cd $(srcdir)/po; git status *.pot)
-	@echo
-	@echo ... then check in with zanata ...
-	@echo
-	@echo % cd $(srcdir)
-	@echo % zanata-cli -B push -s po -t po
-	@echo % zanata-cli -B pull -s po -t po
 	@echo
 	@echo if the .po files are shown as modified ...
 	@echo

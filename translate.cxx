@@ -33,6 +33,21 @@
 #include <cstring>
 #include <cerrno>
 
+#include <atomic>
+#include <deque>
+#include <exception>
+#include <thread>
+#ifdef HAVE_BOOST_ASIO_THREAD_POOL_HPP
+#include <boost/asio/thread_pool.hpp>
+#else
+#error "boost/asio/thread_pool.hpp is required"
+#endif
+#ifdef HAVE_BOOST_ASIO_POST_HPP
+#include <boost/asio/post.hpp>
+#else
+#error "boost/asio/post.hpp is required"
+#endif
+
 extern "C" {
 #include <dwarf.h>
 #include <elfutils/libdwfl.h>
@@ -277,6 +292,7 @@ struct c_unparser: public unparser, public visitor
   void visit_entry_op (entry_op* e);
   void visit_perf_op (perf_op* e);
   void visit_enum_op (enum_op* e);
+  void visit_enumname_op (enumname_op* e);
 
   // start/close statements with multiple independent child visits
   virtual void start_compound_statement (const char*, statement*) { }
@@ -1103,7 +1119,7 @@ c_unparser::get_probe_dupe (derived_probe *dp)
   // Notice we're using the probe body itself instead of the emitted C
   // probe body to compare probes.  We need to do this because the
   // emitted C probe body has stuff in it like:
-  //   c->last_stmt = "identifier 'printf' at foo.stp:<line>:<column>";
+  //   STAP_LAST_STMT = "identifier 'printf' at foo.stp:<line>:<column>";
   //
   // which would make comparisons impossible.
 
@@ -2749,6 +2765,7 @@ c_unparser::emit_function (functiondecl* v)
   o->newline() << "(void) l;"; // make sure "l" is marked used
   o->newline() << "#define CONTEXT c";
   o->newline() << "#define THIS l";
+  o->newline() << "#define STAP_LAST_STMT (c->last_stmt[c->nesting+1])";
   for (unsigned i = 0; i < v->formal_args.size(); i++) {
     o->newline() << c_arg_define(v->formal_args[i]->name); // #define STAP_ARG_foo ...
   }
@@ -2758,10 +2775,6 @@ c_unparser::emit_function (functiondecl* v)
   // define STAP_RETVALUE only if the function is non-void
   if (v->type != pe_unknown)
     o->newline() << "#define STAP_RETVALUE THIS->__retvalue";
-
-  // set this, in case embedded-c code sets last_error but doesn't otherwise identify itself
-  if (v->tok)
-    o->newline() << "c->last_stmt = " << lex_cast_qstring(*v->tok) << ";";
 
   // check/increment nesting level
   // NB: incoming c->nesting level will be -1 (if we're called directly from a probe),
@@ -2775,6 +2788,9 @@ c_unparser::emit_function (functiondecl* v)
   o->newline(-1) << "} else {";
   o->newline(1) << "c->nesting ++;";
   o->newline(-1) << "}";
+  // fallback location for embedded-C-only tapset functions
+  if (v->tok)
+    o->newline() << "STAP_LAST_STMT = " << lex_cast_qstring(*v->tok) << ";";
 
   // initialize runtime overloading flag
   o->newline() << "c->next = 0;";
@@ -2844,10 +2860,11 @@ c_unparser::emit_function (functiondecl* v)
   o->newline(-1) << "deref_fault: __attribute__((unused));";
   o->newline(0) << "out: __attribute__((unused));";
 
-  // Function prologue: this is why we redirect the "return" above.
-  // Decrement nesting level.
-  o->newline(1) << "c->nesting --;";
+  // Function epilogue: clear this frame on success, then decrement nesting.
+  o->newline(1) << "if (likely(!c->last_error && !c->aborted)) STAP_LAST_STMT = NULL;";
+  o->newline() << "c->nesting --;";
 
+  o->newline() << "#undef STAP_LAST_STMT";
   o->newline() << "#undef CONTEXT";
   o->newline() << "#undef THIS";
   o->newline() << "#undef STAP_NEXT";
@@ -3059,6 +3076,8 @@ c_unparser::emit_probe (derived_probe* v)
         }
 
       v->initialize_probe_context_vars (o);
+
+      o->newline() << "#define STAP_LAST_STMT (c->last_stmt[c->nesting+1])";
 
       max_action_info mai (*session);
       v->body->visit (&mai);
@@ -3844,7 +3863,7 @@ c_unparser_assignment::c_assignop(tmpvar & res,
 		  o->newline() << "if (unlikely(!" << rval << ")) {";
 		  o->newline(1) << "c->last_error = ";
                   o->line() << STAP_T_03;
-		  o->newline() << "c->last_stmt = " << lex_cast_qstring(*rvalue->tok) << ";";
+		  o->newline() << "STAP_LAST_STMT = " << lex_cast_qstring(*rvalue->tok) << ";";
 		  o->newline() << "goto out;";
 		  o->newline(-1) << "}";
 		  o->newline() << lval << " = "
@@ -4026,7 +4045,7 @@ c_unparser::record_actions (unsigned actions, const token* tok, bool update)
       // XXX it really ought to be illegal for anything to be missing a token,
       // but until we're sure of that, we need to defend against NULL.
       if (tok)
-        o->newline() << "c->last_stmt = " << lex_cast_qstring(*tok) << ";";
+        o->newline() << "STAP_LAST_STMT = " << lex_cast_qstring(*tok) << ";";
 
       o->newline() << "goto out;";
       o->newline(-1) << "}";
@@ -4038,6 +4057,12 @@ c_unparser::record_actions (unsigned actions, const token* tok, bool update)
 void
 c_unparser::visit_block (block *s)
 {
+  if (s->tok) {
+    o->newline() << "#ifdef STP_EXECTRACE";
+    o->newline() << "__stp_exectrace(__FILE__ \":\" _STRINGIFY(__LINE__) \" "
+                 << s->tok->location.file->name << ":" << lex_cast(s->tok->location.line) << ":" << lex_cast(s->tok->location.column) << "\");";
+    o->newline() << "#endif";
+  }
   // Key insight: individual statements of a block can reuse
   // temporary variable slots, since temporaries don't survive
   // statement boundaries.  So we use gcc's anonymous union/struct
@@ -4114,6 +4139,12 @@ c_unparser::visit_block (block *s)
 
 void c_unparser::visit_try_block (try_block *s)
 {
+  if (s->tok) {
+    o->newline() << "#ifdef STP_EXECTRACE";
+    o->newline() << "__stp_exectrace(__FILE__ \":\" _STRINGIFY(__LINE__) \" "
+                 << s->tok->location.file->name << ":" << lex_cast(s->tok->location.line) << ":" << lex_cast(s->tok->location.column) << "\");";
+    o->newline() << "#endif";
+  }
   record_actions(0, s->tok, true); // flush prior actions
 
   start_compound_statement ("try_block", s);
@@ -4158,6 +4189,7 @@ void c_unparser::visit_try_block (try_block *s)
       c_strcpy (cev.value(), "c->last_error");
     }
   o->newline() << "c->last_error = NULL;";
+  o->newline() << "{ int _stp_i; for (_stp_i = c->nesting + 2; _stp_i <= MAXNESTING; _stp_i++) c->last_stmt[_stp_i] = NULL; }";
 
   // Prevent the catch{} handler from even starting if MAXACTIONS have
   // already been used up.  Add one for the act of catching too.
@@ -4183,6 +4215,12 @@ void c_unparser::visit_try_block (try_block *s)
 void
 c_unparser::visit_embeddedcode (embeddedcode *s)
 {
+  if (s->tok) {
+    o->newline() << "#ifdef STP_EXECTRACE";
+    o->newline() << "__stp_exectrace(__FILE__ \":\" _STRINGIFY(__LINE__) \" "
+                 << s->tok->location.file->name << ":" << lex_cast(s->tok->location.line) << ":" << lex_cast(s->tok->location.column) << "\");";
+    o->newline() << "#endif";
+  }
   // Automatically add a call to assert_is_myproc to any code tagged with
   // /* myproc-unprivileged */
   if (s->tagged_p ("/* myproc-unprivileged */"))
@@ -4241,6 +4279,12 @@ c_unparser::visit_embeddedcode (embeddedcode *s)
 void
 c_unparser::visit_null_statement (null_statement *s)
 {
+  if (s->tok) {
+    o->newline() << "#ifdef STP_EXECTRACE";
+    o->newline() << "__stp_exectrace(__FILE__ \":\" _STRINGIFY(__LINE__) \" "
+                 << s->tok->location.file->name << ":" << lex_cast(s->tok->location.line) << ":" << lex_cast(s->tok->location.column) << "\");";
+    o->newline() << "#endif";
+  }
   o->newline() << "/* null */;";
   locks_not_needed_argh(s);
 }
@@ -4249,6 +4293,12 @@ c_unparser::visit_null_statement (null_statement *s)
 void
 c_unparser::visit_expr_statement (expr_statement *s)
 {
+  if (s->tok) {
+    o->newline() << "#ifdef STP_EXECTRACE";
+    o->newline() << "__stp_exectrace(__FILE__ \":\" _STRINGIFY(__LINE__) \" "
+                 << s->tok->location.file->name << ":" << lex_cast(s->tok->location.line) << ":" << lex_cast(s->tok->location.column) << "\");";
+    o->newline() << "#endif";
+  }
   bool ln = locks_needed_p(s);
   
   if (!ln)
@@ -4345,6 +4395,12 @@ c_tmpcounter::close_compound_statement (const char*, statement *)
 void
 c_unparser::visit_if_statement (if_statement *s)
 {
+  if (s->tok) {
+    o->newline() << "#ifdef STP_EXECTRACE";
+    o->newline() << "__stp_exectrace(__FILE__ \":\" _STRINGIFY(__LINE__) \" "
+                 << s->tok->location.file->name << ":" << lex_cast(s->tok->location.line) << ":" << lex_cast(s->tok->location.column) << "\");";
+    o->newline() << "#endif";
+  }
   record_actions(1, s->tok, true);
 
   start_compound_statement ("if_statement", s);
@@ -4416,6 +4472,12 @@ c_unparser::visit_if_statement (if_statement *s)
 void
 c_unparser::visit_for_loop (for_loop *s)
 {
+  if (s->tok) {
+    o->newline() << "#ifdef STP_EXECTRACE";
+    o->newline() << "__stp_exectrace(__FILE__ \":\" _STRINGIFY(__LINE__) \" "
+                 << s->tok->location.file->name << ":" << lex_cast(s->tok->location.line) << ":" << lex_cast(s->tok->location.column) << "\");";
+    o->newline() << "#endif";
+  }
   string ctr = lex_cast (label_counter++);
   string toplabel = "top_" + ctr;
   string contlabel = "continue_" + ctr;
@@ -4573,6 +4635,12 @@ c_unparser::get_foreach_loop_value (arrayindex* ai, string& value)
 void
 c_unparser::visit_foreach_loop (foreach_loop *s)
 {
+  if (s->tok) {
+    o->newline() << "#ifdef STP_EXECTRACE";
+    o->newline() << "__stp_exectrace(__FILE__ \":\" _STRINGIFY(__LINE__) \" "
+                 << s->tok->location.file->name << ":" << lex_cast(s->tok->location.line) << ":" << lex_cast(s->tok->location.column) << "\");";
+    o->newline() << "#endif";
+  }
   symbol *array;
   hist_op *hist;
   classify_indexable (s->base, array, hist);
@@ -4610,7 +4678,7 @@ c_unparser::visit_foreach_loop (foreach_loop *s)
 	  o->newline() << "if (unlikely(NULL == " << mv.calculate_aggregate() << ")) {";
 	  o->newline(1) << "c->last_error = ";
           o->line() << STAP_T_05 << mv << "\";";
-	  o->newline() << "c->last_stmt = " << lex_cast_qstring(*s->tok) << ";";
+	  o->newline() << "STAP_LAST_STMT = " << lex_cast_qstring(*s->tok) << ";";
 	  o->newline() << "goto out;";
 	  o->newline(-1) << "}";
 
@@ -4878,6 +4946,12 @@ c_unparser::visit_foreach_loop (foreach_loop *s)
 void
 c_unparser::visit_return_statement (return_statement* s)
 {
+  if (s->tok) {
+    o->newline() << "#ifdef STP_EXECTRACE";
+    o->newline() << "__stp_exectrace(__FILE__ \":\" _STRINGIFY(__LINE__) \" "
+                 << s->tok->location.file->name << ":" << lex_cast(s->tok->location.line) << ":" << lex_cast(s->tok->location.column) << "\");";
+    o->newline() << "#endif";
+  }
   if (current_function == 0)
     throw SEMANTIC_ERROR (_("cannot 'return' from probe"), s->tok);
 
@@ -4908,6 +4982,12 @@ c_unparser::visit_return_statement (return_statement* s)
 void
 c_unparser::visit_next_statement (next_statement* s)
 {
+  if (s->tok) {
+    o->newline() << "#ifdef STP_EXECTRACE";
+    o->newline() << "__stp_exectrace(__FILE__ \":\" _STRINGIFY(__LINE__) \" "
+                 << s->tok->location.file->name << ":" << lex_cast(s->tok->location.line) << ":" << lex_cast(s->tok->location.column) << "\");";
+    o->newline() << "#endif";
+  }
   /* Set next flag to indicate to caller to call next alternative function */
   if (current_function != 0)
     {
@@ -5038,7 +5118,7 @@ delete_statement_operand_visitor::visit_arrayindex (arrayindex* e)
                            << mvar.calculate_aggregate() << ")) {";
               o->newline(1) << "c->last_error = ";
               o->line() << STAP_T_05 << mvar << "\";";
-              o->newline() << "c->last_stmt = "
+              o->newline() << "STAP_LAST_STMT = "
                            << lex_cast_qstring(*e->tok) << ";";
               o->newline() << "goto out;";
               o->newline(-1) << "}";
@@ -5109,6 +5189,12 @@ delete_statement_operand_visitor::visit_arrayindex (arrayindex* e)
 void
 c_unparser::visit_delete_statement (delete_statement* s)
 {
+  if (s->tok) {
+    o->newline() << "#ifdef STP_EXECTRACE";
+    o->newline() << "__stp_exectrace(__FILE__ \":\" _STRINGIFY(__LINE__) \" "
+                 << s->tok->location.file->name << ":" << lex_cast(s->tok->location.line) << ":" << lex_cast(s->tok->location.column) << "\");";
+    o->newline() << "#endif";
+  }
   bool ln = locks_needed_p (s);
 
   if (!ln) // unlikely, as delete usually operates on globals
@@ -5130,6 +5216,12 @@ c_unparser::visit_delete_statement (delete_statement* s)
 void
 c_unparser::visit_break_statement (break_statement* s)
 {
+  if (s->tok) {
+    o->newline() << "#ifdef STP_EXECTRACE";
+    o->newline() << "__stp_exectrace(__FILE__ \":\" _STRINGIFY(__LINE__) \" "
+                 << s->tok->location.file->name << ":" << lex_cast(s->tok->location.line) << ":" << lex_cast(s->tok->location.column) << "\");";
+    o->newline() << "#endif";
+  }
   locks_not_needed_argh(s);
 
   if (loop_break_labels.empty())
@@ -5143,6 +5235,12 @@ c_unparser::visit_break_statement (break_statement* s)
 void
 c_unparser::visit_continue_statement (continue_statement* s)
 {
+  if (s->tok) {
+    o->newline() << "#ifdef STP_EXECTRACE";
+    o->newline() << "__stp_exectrace(__FILE__ \":\" _STRINGIFY(__LINE__) \" "
+                 << s->tok->location.file->name << ":" << lex_cast(s->tok->location.line) << ":" << lex_cast(s->tok->location.column) << "\");";
+    o->newline() << "#endif";
+  }
   locks_not_needed_argh(s);
 
   if (loop_continue_labels.empty())
@@ -5297,7 +5395,7 @@ c_unparser::visit_binary_expression (binary_expression* e)
       o->newline() << "if (unlikely(!" << right << ")) {";
       o->newline(1) << "c->last_error = ";
       o->line() << STAP_T_03;
-      o->newline() << "c->last_stmt = " << lex_cast_qstring(*e->tok) << ";";
+      o->newline() << "STAP_LAST_STMT = " << lex_cast_qstring(*e->tok) << ";";
       o->newline() << "goto out;";
       o->newline(-1) << "}";
       o->newline() << ((e->op == "/") ? "_stp_div64" : "_stp_mod64")
@@ -5396,7 +5494,7 @@ c_unparser::visit_array_in (array_in* e)
       if (!array_slice) // checking for membership of a specific element
         {
           load_map_indices (e->operand, idx);
-          // o->newline() << "c->last_stmt = " << lex_cast_qstring(*e->tok) << ";";
+          // o->newline() << "STAP_LAST_STMT = " << lex_cast_qstring(*e->tok) << ";";
 
           mapvar mvar = getmap (array->referent, e->tok);
           c_assign (res, mvar.exists(idx), e->tok);
@@ -5432,7 +5530,7 @@ c_unparser::visit_array_in (array_in* e)
                            << mvar.calculate_aggregate() << ")) {";
               o->newline(1) << "c->last_error = ";
               o->line() << STAP_T_05 << mvar << "\";";
-              o->newline() << "c->last_stmt = " << lex_cast_qstring(*e->tok) << ";";
+              o->newline() << "STAP_LAST_STMT = " << lex_cast_qstring(*e->tok) << ";";
               o->newline() << "goto out;";
               o->newline(-1) << "}";
             }
@@ -5578,7 +5676,7 @@ c_unparser::visit_concatenation (concatenation* e)
 
   o->line() << "({ ";
   o->indent(1);
-  // o->newline() << "c->last_stmt = " << lex_cast_qstring(*e->tok) << ";";
+  // o->newline() << "STAP_LAST_STMT = " << lex_cast_qstring(*e->tok) << ";";
   c_assign (t.value(), e->operands[0], "assignment");
   for (size_t i = 1; i < e->operands.size(); ++i)
     c_strcat (t.value(), e->operands[i]);
@@ -5767,7 +5865,7 @@ c_unparser_assignment::visit_symbol (symbol *e)
   if (e->referent->index_types.size() != 0)
     throw SEMANTIC_ERROR (_("unexpected reference to array"), e->tok);
 
-  // o->newline() << "c->last_stmt = " << lex_cast_qstring(*e->tok) << ";";
+  // o->newline() << "STAP_LAST_STMT = " << lex_cast_qstring(*e->tok) << ";";
   exp_type ty = rvalue ? rvalue->type : e->type;
   tmpvar rval = parent->gensym (ty);
   tmpvar res = parent->gensym (ty);
@@ -5883,6 +5981,13 @@ c_unparser::visit_enum_op (enum_op* e)
 
 
 void
+c_unparser::visit_enumname_op (enumname_op* e)
+{
+  throw SEMANTIC_ERROR(_("cannot translate @enumname expression"), e->tok);
+}
+
+
+void
 c_unparser::load_map_indices(arrayindex *e,
 			     vector<tmpvar> & idx)
 {
@@ -5934,7 +6039,7 @@ c_unparser::load_aggregate (expression *e, aggvar & agg)
   if (sym->referent->arity == 0)
     {
       v = new var(getvar(sym->referent, sym->tok));
-      // o->newline() << "c->last_stmt = " << lex_cast_qstring(*sym->tok) << ";";
+      // o->newline() << "STAP_LAST_STMT = " << lex_cast_qstring(*sym->tok) << ";";
       o->newline() << agg << " = _stp_stat_get (" << *v << ", 0);";
     }
   else
@@ -5954,7 +6059,7 @@ c_unparser::load_aggregate (expression *e, aggvar & agg)
         {
           vector<tmpvar> idx;
           load_map_indices (arr, idx);
-          // o->newline() << "c->last_stmt = " << lex_cast_qstring(*sym->tok) << ";";
+          // o->newline() << "STAP_LAST_STMT = " << lex_cast_qstring(*sym->tok) << ";";
 	  bool pre_agg = (aggregations_active.count(mv->value()) > 0);
           o->newline() << agg << " = " << mv->get(idx, pre_agg) << ";";
         }
@@ -6000,7 +6105,7 @@ c_unparser::visit_arrayindex (arrayindex* e)
       tmpvar res = gensym (e->type);
 
       mapvar mvar = getmap (array->referent, e->tok);
-      // o->newline() << "c->last_stmt = " << lex_cast_qstring(*e->tok) << ";";
+      // o->newline() << "STAP_LAST_STMT = " << lex_cast_qstring(*e->tok) << ";";
       c_assign (res, mvar.get(idx), e->tok);
 
       o->newline() << res << ";";
@@ -6048,7 +6153,7 @@ c_unparser::visit_arrayindex (arrayindex* e)
       var *v = load_aggregate(hist->stat, agg);
       v->assert_hist_compatible(*hist);
 
-      o->newline() << "c->last_stmt = " << lex_cast_qstring(*e->tok) << ";";
+      o->newline() << "STAP_LAST_STMT = " << lex_cast_qstring(*e->tok) << ";";
 
       // PR 2142+2610: empty aggregates
       o->newline() << "if (unlikely (" << agg.value() << " == NULL)"
@@ -6133,7 +6238,7 @@ c_unparser_assignment::visit_arrayindex (arrayindex *e)
 	  assert (rvalue->type == pe_long);
 
 	  mapvar mvar = parent->getmap (array->referent, e->tok);
-	  o->newline() << "c->last_stmt = " << lex_cast_qstring(*e->tok) << ";";
+	  o->newline() << "STAP_LAST_STMT = " << lex_cast_qstring(*e->tok) << ";";
 	  o->newline() << mvar.add (idx, rvar) << ";";
           res = rvar;
 	  // no need for these dummy assignments
@@ -6143,7 +6248,7 @@ c_unparser_assignment::visit_arrayindex (arrayindex *e)
       else
 	{
 	  mapvar mvar = parent->getmap (array->referent, e->tok);
-	  o->newline() << "c->last_stmt = " << lex_cast_qstring(*e->tok) << ";";
+	  o->newline() << "STAP_LAST_STMT = " << lex_cast_qstring(*e->tok) << ";";
 	  if (op != "=") // don't bother fetch slot if we will just overwrite it
 	    parent->c_assign (lvar, mvar.get(idx), e->tok);
 	  c_assignop (res, lvar, rvar, e->tok);
@@ -6264,7 +6369,7 @@ c_unparser::visit_functioncall (functioncall* e)
         }
 
       // call function
-      o->newline() << "c->last_stmt = " << lex_cast_qstring(*e->tok) << ";";
+      o->newline() << "STAP_LAST_STMT = " << lex_cast_qstring(*e->tok) << ";";
       o->newline() << c_funcname (r->name) << " (c);";
       o->newline() << "if (unlikely(c->last_error || c->aborted)) goto out;";
 
@@ -6312,7 +6417,7 @@ c_unparser::visit_functioncall (functioncall* e)
     // check for aborted return from function; this could happen from non-overloaded ones too
     o->newline()
       << "if (unlikely(c->next)) { "
-      << "c->last_stmt = " << lex_cast_qstring(*e->tok) << "; "
+      << "STAP_LAST_STMT = " << lex_cast_qstring(*e->tok) << "; "
       << "c->last_error = \"all functions exhausted\"; goto out; }";
 
   // return result from retvalue slot NB: this must be last, for the
@@ -6427,7 +6532,7 @@ c_unparser::visit_print_format (print_format* e)
                      << " || " <<  agg.value() << "->count == 0) {";
         o->newline(1) << "c->last_error = ";
         o->line() << STAP_T_06;
-	o->newline() << "c->last_stmt = " << lex_cast_qstring(*e->tok) << ";";
+	o->newline() << "STAP_LAST_STMT = " << lex_cast_qstring(*e->tok) << ";";
 	o->newline() << "goto out;";
         o->newline(-1) << "} else";
         if (e->print_to_stream)
@@ -6512,7 +6617,7 @@ c_unparser::visit_print_format (print_format* e)
 	      mem_size = "1LL";
 
 	    /* Limit how much can be printed at a time. (see also PR10490) */
-	    o->newline() << "c->last_stmt = " << lex_cast_qstring(*prec_tok) << ";";
+	    o->newline() << "STAP_LAST_STMT = " << lex_cast_qstring(*prec_tok) << ";";
 	    o->newline() << "if (" << mem_size << " > PAGE_SIZE) {";
 	    o->newline(1) << "snprintf(c->error_buffer, sizeof(c->error_buffer), "
 			  << "\"%lld is too many bytes for a memory dump\", (long long)"
@@ -6647,7 +6752,7 @@ c_unparser::visit_stat_op (stat_op* e)
                        << " || " <<  agg.value() << "->count == 0) {";
           o->newline(1) << "c->last_error = ";
           o->line() << STAP_T_06;
-          o->newline() << "c->last_stmt = " << lex_cast_qstring(*e->tok) << ";";
+          o->newline() << "STAP_LAST_STMT = " << lex_cast_qstring(*e->tok) << ";";
           o->newline() << "goto out;";
           o->newline(-1) << "}";
         }
@@ -6709,11 +6814,22 @@ c_unparser::visit_hist_op (hist_op*)
 
 typedef map<Dwarf_Addr,const char*> addrmap_t; // NB: plain map, sorted by address
 
+// One context per module (see dump_unwindsyms), so each worker task touches
+// only its own context and no per-field locking is needed.
 struct unwindsym_dump_context
 {
   systemtap_session& session;
-  ostream& output;
   unsigned stp_module_index;
+
+  string modname;          // module name; valid after the owning Dwfl is freed
+  ostringstream output;    // translated output for this module
+  ostringstream log;       // buffered verbose logging, flushed in module order
+
+  // Processing result; DWARF_CB_OK iff this module's data was emitted.
+  // Defaults to DWARF_CB_ABORT so an unfinished module is not emitted.
+  int res;
+  // First exception from processing; rethrown on the main thread after join.
+  std::exception_ptr pending_exception;
 
   int build_id_len;
   unsigned char *build_id_bits;
@@ -6742,7 +6858,31 @@ struct unwindsym_dump_context
   void *debug_line_str;
   size_t debug_line_str_len;
 
-  set<string> undone_unwindsym_modules;
+  unwindsym_dump_context (systemtap_session& s, unsigned modindex)
+    : session (s),
+      stp_module_index (modindex),
+      res (DWARF_CB_ABORT),
+      build_id_len (0),
+      build_id_bits (NULL),
+      build_id_vaddr (0),
+      stp_kretprobe_trampoline_addr (~0UL),
+      stext_offset (0),
+      debug_frame (NULL),
+      debug_len (0),
+      debug_frame_hdr (NULL),
+      debug_frame_hdr_len (0),
+      debug_frame_off (0),
+      eh_frame (NULL),
+      eh_frame_hdr (NULL),
+      eh_len (0),
+      eh_frame_hdr_len (0),
+      eh_addr (0),
+      eh_frame_hdr_addr (0),
+      debug_line (NULL),
+      debug_line_len (0),
+      debug_line_str (NULL),
+      debug_line_str_len (0)
+  {}
 };
 
 static bool need_byte_swap_for_target (const unsigned char e_ident[])
@@ -7011,8 +7151,8 @@ dump_build_id (Dwfl_Module *m,
 
     if (c->session.verbose > 1)
       {
-        clog << _F("Found build-id in %s, length %d, start at %#" PRIx64,
-                   name, build_id_len, build_id_vaddr) << endl;
+        c->log << _F("Found build-id in %s, length %d, start at %#" PRIx64,
+                     name, build_id_len, build_id_vaddr) << endl;
       }
 
     c->build_id_len = build_id_len;
@@ -7396,7 +7536,7 @@ dump_symbol_tables (Dwfl_Module *m,
 			       ki >= 0);
 
 		  if (c->session.verbose > 2)
-		    clog << _F("Found kernel _stext extra offset %#" PRIx64,
+		    c->log << _F("Found kernel _stext extra offset %#" PRIx64,
 			       extra_offset) << endl;
 
 		  if (! c->session.need_symbols
@@ -7919,8 +8059,6 @@ dump_unwindsym_cxt (Dwfl_Module *m,
 
   c->output << "};\n\n";
 
-  c->undone_unwindsym_modules.erase (modname);
-
   // release various malloc'd tables
   // if (eh_frame_hdr) free (eh_frame_hdr); -- nope, this one comes from the elf image in memory
   if (debug_frame_hdr) free (debug_frame_hdr);
@@ -7988,10 +8126,103 @@ static void dump_kallsyms(unwindsym_dump_context *c)
   c->output << ".num_sections = sizeof(_stp_module_" << stpmod_idx << "_sections)/"
             << "sizeof(struct _stp_section),\n";
   c->output << "};\n\n";
-
-  c->undone_unwindsym_modules.erase("kernel");
-  c->stp_module_index++;
 }
+
+// One pending module dump, collected while the main thread scans the Dwfls.
+struct module_task
+{
+  unwindsym_dump_context *c;
+  Dwfl_Module *m;
+  const char *name;   // Dwfl-owned; valid until dwfl_end
+  Dwarf_Addr base;
+};
+
+// Dispatcher state.  dwfl_getmodules() runs the callback only on the main
+// thread, so no locking here.
+struct dump_dispatch
+{
+  systemtap_session& session;
+  deque<unwindsym_dump_context>& ctxs;
+  unsigned& modindex;
+  vector<module_task>& tasks;
+};
+
+// Dump one module into c->output, exactly as the original serial code did.
+// May run on a worker thread, so exceptions are captured for later rethrow.
+static void
+process_module (unwindsym_dump_context *c, std::atomic<bool> *failed,
+                Dwfl_Module *m, const char *name, Dwarf_Addr base)
+{
+  // We want to extract several bits of information:
+  //
+  // - parts of the program-header that map the file's physical offsets to the text section
+  // - section table: just a list of section (relocation) base addresses
+  // - symbol table of the text-like sections, with all addresses relativized to each base
+  // - the contents of .debug_frame and/or .eh_frame section, for unwinding purposes
+  // Interrupted, or another module failed?  Skip; emit_symbol_data
+  // re-checks interrupts and rethrows errors after the pool is joined.
+  if (pending_interrupts || *failed)
+    {
+      c->res = DWARF_CB_ABORT;
+      return;
+    }
+
+  try
+    {
+      int res = dump_build_id (m, c, name, base);
+
+      if (res == DWARF_CB_OK)
+        res = dump_section_list (m, c, name, base);
+
+      // We always need to check the symbols of the kernel if we use it,
+      // for the extra_offset (also used for build_ids) and possibly
+      // stp_kretprobe_trampoline_addr for the dwarf unwinder.
+      if (res == DWARF_CB_OK
+          && (c->session.need_symbols || ! strcmp (name, "kernel")))
+        res = dump_symbol_tables (m, c, name, base);
+
+      if (res == DWARF_CB_OK && c->session.need_unwind)
+        res = dump_unwind_tables (m, c, name, base);
+
+      if (res == DWARF_CB_OK && c->session.need_lines)
+        // we dont gate on dump_line_tables()'s result because unwindsym stuff
+        // should still get dumped to the output even if gathering debug_line
+        // data fails
+        (void) dump_line_tables (m, c, name, base);
+
+      // And finally dump everything collected into c->output.
+      if (res == DWARF_CB_OK)
+        res = dump_unwindsym_cxt (m, c, name, base);
+
+      c->res = res;
+    }
+  catch (...)
+    {
+      c->pending_exception = std::current_exception ();
+      c->res = DWARF_CB_ABORT;
+      *failed = true;
+    }
+
+  // Release scratch tables early; only the dump results are read after this.
+  c->addrmap.clear ();
+  c->seclist.clear ();
+}
+
+// Owns the Dwfls opened during the scan so an exception cannot leak them.
+// They must stay open until the worker pool has been joined.
+struct dwfl_collection
+{
+  vector<Dwfl *> dwfls;
+
+  void keep (Dwfl *dwfl) { dwfls.push_back (dwfl); }
+  void end_all ()
+  {
+    for (vector<Dwfl *>::iterator it = dwfls.begin (); it != dwfls.end (); ++it)
+      dwfl_end (*it);
+    dwfls.clear ();
+  }
+  ~dwfl_collection () { end_all (); }
+};
 
 static int
 dump_unwindsyms (Dwfl_Module *m,
@@ -8003,83 +8234,39 @@ dump_unwindsyms (Dwfl_Module *m,
   if (pending_interrupts)
     return DWARF_CB_ABORT;
 
-  unwindsym_dump_context *c = (unwindsym_dump_context*) arg;
-  assert (c);
+  dump_dispatch *d = (dump_dispatch *) arg;
+  assert (d);
 
   // skip modules/files we're not actually interested in
   string modname = name;
-  if (c->session.unwindsym_modules.find(modname)
-      == c->session.unwindsym_modules.end())
+  if (d->session.unwindsym_modules.find (modname)
+      == d->session.unwindsym_modules.end ())
     return DWARF_CB_OK;
 
-  if (c->session.verbose > 1)
-    clog << "dump_unwindsyms " << name
-         << " index=" << c->stp_module_index
-         << " base=0x" << hex << base << dec << endl;
+  // Allocated on the main thread; the deque keeps the pointers captured by
+  // worker tasks stable as more contexts are appended.
+  d->ctxs.emplace_back (d->session, d->modindex++);
+  unwindsym_dump_context *c = &d->ctxs.back ();
+  c->modname = modname;
 
-  // We want to extract several bits of information:
-  //
-  // - parts of the program-header that map the file's physical offsets to the text section
-  // - section table: just a list of section (relocation) base addresses
-  // - symbol table of the text-like sections, with all addresses relativized to each base
-  // - the contents of .debug_frame and/or .eh_frame section, for unwinding purposes
+  if (d->session.verbose > 1)
+    c->log << "dump_unwindsyms " << name
+           << " index=" << c->stp_module_index
+           << " base=0x" << hex << base << dec << endl;
 
-  int res = DWARF_CB_OK;
+  // The task references Dwfl-owned storage (m, name), so dwfl_end() must be
+  // deferred until the pool has been joined.
+  d->tasks.push_back (module_task { c, m, name, base });
 
-  c->build_id_len = 0;
-  c->build_id_vaddr = 0;
-  c->build_id_bits = NULL;
-  res = dump_build_id (m, c, name, base);
-
-  c->seclist.clear();
-  if (res == DWARF_CB_OK)
-    res = dump_section_list(m, c, name, base);
-
-  // We always need to check the symbols of the kernel if we use it,
-  // for the extra_offset (also used for build_ids) and possibly
-  // stp_kretprobe_trampoline_addr for the dwarf unwinder.
-  c->addrmap.clear();
-  if (res == DWARF_CB_OK
-      && (c->session.need_symbols || ! strcmp(name, "kernel")))
-    res = dump_symbol_tables (m, c, name, base);
-
-  c->debug_frame = NULL;
-  c->debug_len = 0;
-  c->debug_frame_hdr = NULL;
-  c->debug_frame_hdr_len = 0;
-  c->debug_frame_off = 0;
-  c->eh_frame = NULL;
-  c->eh_frame_hdr = NULL;
-  c->eh_len = 0;
-  c->eh_frame_hdr_len = 0;
-  c->eh_addr = 0;
-  c->eh_frame_hdr_addr = 0;
-  if (res == DWARF_CB_OK && c->session.need_unwind)
-    res = dump_unwind_tables (m, c, name, base);
-
-  c->debug_line = NULL;
-  c->debug_line_len = 0;
-  c->debug_line_str = NULL;
-  c->debug_line_str_len = 0;
-  if (res == DWARF_CB_OK && c->session.need_lines)
-    // we dont set res = dump_line_tables() because unwindsym stuff should still
-    // get dumped to the output even if gathering debug_line data fails
-    (void) dump_line_tables (m, c, name, base);
-
-  /* And finally dump everything collected in the output. */
-  if (res == DWARF_CB_OK)
-    res = dump_unwindsym_cxt (m, c, name, base);
-
-  if (res == DWARF_CB_OK)
-    c->stp_module_index++;
-
-  return res;
+  return DWARF_CB_OK;
 }
 
 
 // Emit symbol table & unwind data, plus any calls needed to register
 // them with the runtime.
-void emit_symbol_data_done (unwindsym_dump_context*, systemtap_session&);
+void emit_symbol_data_done (const vector<unsigned>& module_indices, ostream&,
+			    unsigned long, const set<string>&,
+			    systemtap_session&);
 
 
 void
@@ -8114,11 +8301,13 @@ add_unwindsym_ldd (systemtap_session &s)
       assert (modname.length() != 0);
       if (! is_user_module (modname)) continue;
 
+      dwflpp_focus focus;
+      dwflpp_focus_binder bind (focus);
       dwflpp mod_dwflpp (s, modname, false);
       mod_dwflpp.iterate_over_modules(&query_module, &mod_dwflpp);
-      if (mod_dwflpp.module) // existing binary
+      if (mod_dwflpp.module()) // existing binary
         {
-          assert (mod_dwflpp.module_name != "");
+          assert (mod_dwflpp.module_name() != "");
           mod_dwflpp.iterate_over_libraries (&add_unwindsym_iol_callback, &added);
         }
     }
@@ -8190,12 +8379,18 @@ prepare_symbol_data (systemtap_session& s)
   // step 0.5: add vdso(s) when vma tracker was requested
   if (vma_tracker_enabled (s))
     add_unwindsym_vdso (s);
-  // NB: do this before the ctx.unwindsym_modules copy is taken
+  // NB: do this before emit_symbol_data takes its "undone" copy
 }
 
 void
 emit_symbol_data (systemtap_session& s)
 {
+  unsigned modindex = 0;
+  unsigned long trampoline_addr = ~0UL;
+  deque<unwindsym_dump_context> ctxs;
+  dwfl_collection dwfls;
+  vector<module_task> tasks;
+  std::atomic<bool> dump_failed (false);
   ofstream kallsyms_out (s.symbols_source.c_str ());
 
   if (s.runtime_usermode_p ())
@@ -8211,38 +8406,18 @@ emit_symbol_data (systemtap_session& s)
         "#include \"stap_common.h\"\n";
     }
 
-  vector<pair<string,unsigned> > seclist;
-  map<unsigned, addrmap_t> addrmap;
-  unwindsym_dump_context ctx = { s, kallsyms_out,
-				 0, /* module index */
-				 0, NULL, 0, /* build_id len, bits, vaddr */
-				 ~0UL, /* stp_kretprobe_trampoline_addr */
-				 0, /* stext_offset */
-				 seclist, addrmap,
-				 NULL, /* debug_frame */
-				 0, /* debug_len */
-				 NULL, /* debug_frame_hdr */
-				 0, /* debug_frame_hdr_len */
-				 0, /* debug_frame_off */
-				 NULL, /* eh_frame */
-				 NULL, /* eh_frame_hdr */
-				 0, /* eh_len */
-				 0, /* eh_frame_hdr_len */
-				 0, /* eh_addr */
-				 0, /* eh_frame_hdr_addr */
-				 NULL, /* debug_line */
-				 0, /* debug_line_len */
-				 NULL, /* debug_line_str */
-				 0, /* debug_line_str_len */
-				 s.unwindsym_modules };
-
   // Micro optimization, mainly to speed up tiny regression tests
   // using just begin probe.
   if (s.unwindsym_modules.size () == 0)
     {
-      emit_symbol_data_done(&ctx, s);
+      vector<unsigned> module_indices;
+      set<string> undone;
+      emit_symbol_data_done (module_indices, kallsyms_out, trampoline_addr,
+			     undone, s);
       return;
     }
+
+  dump_dispatch dispatch = { s, ctxs, modindex, tasks };
 
   // ---- step 1: process any kernel modules listed
   set<string> offline_search_modules;
@@ -8258,6 +8433,8 @@ emit_symbol_data (systemtap_session& s)
         offline_search_modules.insert (foo);
     }
   Dwfl *dwfl = setup_dwfl_kernel (offline_search_modules, &count, s);
+  dwfls.keep (dwfl);
+
   /* NB: It's not an error to find a few fewer modules than requested.
      There might be third-party modules loaded (e.g. uprobes). */
   /* DWFL_ASSERT("all kernel modules found",
@@ -8267,12 +8444,10 @@ emit_symbol_data (systemtap_session& s)
   do
     {
       assert_no_interrupts();
-      if (ctx.undone_unwindsym_modules.empty()) break;
-      off = dwfl_getmodules (dwfl, &dump_unwindsyms, (void *) &ctx, off);
+      off = dwfl_getmodules (dwfl, &dump_unwindsyms, &dispatch, off);
     }
   while (off > 0);
   DWFL_ASSERT("dwfl_getmodules", off == 0);
-  dwfl_end(dwfl);
 
   // ---- step 2: process any user modules (files) listed
   for (std::set<std::string>::iterator it = s.unwindsym_modules.begin();
@@ -8282,64 +8457,136 @@ emit_symbol_data (systemtap_session& s)
       string modname = *it;
       assert (modname.length() != 0);
       if (! is_user_module (modname)) continue;
-      Dwfl *dwfl = setup_dwfl_user (modname);
+
+      dwfl = setup_dwfl_user (modname);
+
       if (dwfl != NULL) // tolerate missing data; will warn below
         {
-          ptrdiff_t off = 0;
+          dwfls.keep (dwfl);
+          off = 0;
           do
             {
               assert_no_interrupts();
-              if (ctx.undone_unwindsym_modules.empty()) break;
-              off = dwfl_getmodules (dwfl, &dump_unwindsyms, (void *) &ctx, off);
+              off = dwfl_getmodules (dwfl, &dump_unwindsyms, &dispatch, off);
             }
           while (off > 0);
           DWFL_ASSERT("dwfl_getmodules", off == 0);
         }
-      dwfl_end(dwfl);
     }
 
-  // Use /proc/kallsyms if debuginfo not found.
-  if (ctx.undone_unwindsym_modules.find("kernel") != ctx.undone_unwindsym_modules.end())
-    dump_kallsyms(&ctx);
+  // The scans above are done, so the main thread makes no elfutils calls
+  // while the pool runs.  With a thread-safe elfutils use one worker per
+  // cpu (capped at one per module); otherwise a single worker, so at most
+  // one thread is inside elfutils at a time.
+#ifdef HAVE_ELFUTILS_THREAD_SAFETY
+  unsigned nthreads = stap_nthreads ();
+  if (nthreads > tasks.size ())
+    nthreads = tasks.size ();
+#else
+  unsigned nthreads = 1;
+#endif
 
-  emit_symbol_data_done (&ctx, s);
+  if (! tasks.empty ())
+    {
+      boost::asio::thread_pool worker_pool (nthreads);
+      for (vector<module_task>::iterator it = tasks.begin ();
+           it != tasks.end (); ++it)
+        {
+          module_task t = *it;
+          std::atomic<bool> *failed = &dump_failed;
+          boost::asio::post (worker_pool, [t, failed] {
+            process_module (t.c, failed, t.m, t.name, t.base);
+          });
+        }
+
+      // Wait for all tasks before reading results or ending the Dwfls.
+      worker_pool.join ();
+    }
+
+  // Re-check now so a ^C during the join aborts before anything is flushed.
+  assert_no_interrupts ();
+
+  dwfls.end_all ();
+
+  // Flush buffered verbose logs in module order.
+  for (deque<unwindsym_dump_context>::iterator it = ctxs.begin ();
+       it != ctxs.end (); ++it)
+    clog << it->log.str ();
+
+  // Rethrow the first worker error, now on the main thread.
+  for (deque<unwindsym_dump_context>::iterator it = ctxs.begin ();
+       it != ctxs.end (); ++it)
+    if (it->pending_exception)
+      std::rethrow_exception (it->pending_exception);
+
+  // Flush module output in module order; collect the emitted indices.
+  vector<unsigned> module_indices;
+  set<string> undone (s.unwindsym_modules);
+  for (deque<unwindsym_dump_context>::iterator it = ctxs.begin ();
+       it != ctxs.end (); ++it)
+    {
+      kallsyms_out << it->output.str ();
+
+      if (it->res == DWARF_CB_OK)
+        {
+          module_indices.push_back (it->stp_module_index);
+          undone.erase (it->modname);
+          if (it->modname == "kernel")
+            trampoline_addr = it->stp_kretprobe_trampoline_addr;
+        }
+    }
+
+  // Use /proc/kallsyms if the kernel's debuginfo was not found (PR17921).
+  if (undone.find ("kernel") != undone.end ())
+    {
+      unwindsym_dump_context kc (s, modindex++);
+      dump_kallsyms (&kc);
+      kallsyms_out << kc.output.str ();
+      module_indices.push_back (kc.stp_module_index);
+      undone.erase ("kernel");
+    }
+
+  emit_symbol_data_done (module_indices, kallsyms_out, trampoline_addr,
+			 undone, s);
 }
 
 void
-self_unwind_declarations(unwindsym_dump_context *ctx)
+self_unwind_declarations(ostream& output)
 {
-  ctx->output << "static uint8_t _stp_module_self_eh_frame [] = {0,};\n";
-  ctx->output << "struct _stp_symbol _stp_module_self_symbols_0[] = {{0},};\n";
-  ctx->output << "struct _stp_symbol _stp_module_self_symbols_1[] = {{0},};\n";
-  ctx->output << "struct _stp_section _stp_module_self_sections[] = {\n";
-  ctx->output << "{.name = \".symtab\", .symbols = _stp_module_self_symbols_0, .num_symbols = 0},\n";
-  ctx->output << "{.name = \".text\", .symbols = _stp_module_self_symbols_1, .num_symbols = 0},\n";
-  ctx->output << "};\n";
-  ctx->output << "struct _stp_module _stp_module_self = {\n";
-  ctx->output << ".name = \"stap_self_tmp_value\",\n";
-  ctx->output << ".path = \"stap_self_tmp_value\",\n";
-  ctx->output << ".num_sections = 2,\n";
-  ctx->output << ".sections = _stp_module_self_sections,\n";
-  ctx->output << ".eh_frame = _stp_module_self_eh_frame,\n";
-  ctx->output << ".eh_frame_len = 0,\n";
-  ctx->output << ".unwind_hdr_addr = 0x0,\n";
-  ctx->output << ".unwind_hdr = NULL,\n";
-  ctx->output << ".unwind_hdr_len = 0,\n";
-  ctx->output << ".debug_frame = NULL,\n";
-  ctx->output << ".debug_frame_len = 0,\n";
-  ctx->output << ".debug_line = NULL,\n";
-  ctx->output << ".debug_line_len = 0,\n";
-  ctx->output << ".debug_line_str = NULL,\n";
-  ctx->output << ".debug_line_str_len = 0,\n";
-  ctx->output << "};\n";
+  output << "static uint8_t _stp_module_self_eh_frame [] = {0,};\n";
+  output << "struct _stp_symbol _stp_module_self_symbols_0[] = {{0},};\n";
+  output << "struct _stp_symbol _stp_module_self_symbols_1[] = {{0},};\n";
+  output << "struct _stp_section _stp_module_self_sections[] = {\n";
+  output << "{.name = \".symtab\", .symbols = _stp_module_self_symbols_0, .num_symbols = 0},\n";
+  output << "{.name = \".text\", .symbols = _stp_module_self_symbols_1, .num_symbols = 0},\n";
+  output << "};\n";
+  output << "struct _stp_module _stp_module_self = {\n";
+  output << ".name = \"stap_self_tmp_value\",\n";
+  output << ".path = \"stap_self_tmp_value\",\n";
+  output << ".num_sections = 2,\n";
+  output << ".sections = _stp_module_self_sections,\n";
+  output << ".eh_frame = _stp_module_self_eh_frame,\n";
+  output << ".eh_frame_len = 0,\n";
+  output << ".unwind_hdr_addr = 0x0,\n";
+  output << ".unwind_hdr = NULL,\n";
+  output << ".unwind_hdr_len = 0,\n";
+  output << ".debug_frame = NULL,\n";
+  output << ".debug_frame_len = 0,\n";
+  output << ".debug_line = NULL,\n";
+  output << ".debug_line_len = 0,\n";
+  output << ".debug_line_str = NULL,\n";
+  output << ".debug_line_str_len = 0,\n";
+  output << "};\n";
 }
 
 void
-emit_symbol_data_done (unwindsym_dump_context *ctx, systemtap_session& s)
+emit_symbol_data_done (const vector<unsigned>& module_indices,
+		       ostream& output, unsigned long trampoline_addr,
+		       const set<string>& undone, systemtap_session& s)
 {
   // Add a .eh_frame terminator dummy object file, much like
   // libgcc/crtstuff.c's EH_FRAME_SECTION_NAME closer.  We need this in
-  // order for runtime/sym.c 
+  // order for runtime/sym.c
   translator_output *T_800 = s.op_create_auxiliary(true);
   T_800->newline() << "__extension__ unsigned int T_800 []"; // assumed 32-bits wide
   T_800->newline(1) << "__attribute__((used, section(\".eh_frame\"), aligned(4)))";
@@ -8348,30 +8595,29 @@ emit_symbol_data_done (unwindsym_dump_context *ctx, systemtap_session& s)
   T_800->assert_0_indent (); // flush to disk
 
   // Print out a definition of the runtime's _stp_modules[] globals.
-  ctx->output << "\n";
-  self_unwind_declarations(ctx);
-   ctx->output << "struct _stp_module *_stp_modules [] = {\n";
-  for (unsigned i=0; i<ctx->stp_module_index; i++)
+  output << "\n";
+  self_unwind_declarations(output);
+  output << "struct _stp_module *_stp_modules [] = {\n";
+  for (vector<unsigned>::const_iterator it = module_indices.begin ();
+       it != module_indices.end (); ++it)
     {
-      ctx->output << "& _stp_module_" << i << ",\n";
+      output << "& _stp_module_" << *it << ",\n";
     }
-  ctx->output << "& _stp_module_self,\n";
-  ctx->output << "};\n";
-  ctx->output << "const unsigned _stp_num_modules = ARRAY_SIZE(_stp_modules);\n";
+  output << "& _stp_module_self,\n";
+  output << "};\n";
+  output << "const unsigned _stp_num_modules = ARRAY_SIZE(_stp_modules);\n";
 
-  ctx->output << "unsigned long _stp_kretprobe_trampoline = ";
+  output << "unsigned long _stp_kretprobe_trampoline = ";
   // Special case for -1, which is invalid in hex if host width > target width.
-  if (ctx->stp_kretprobe_trampoline_addr == (unsigned long) -1)
-    ctx->output << "-1;\n";
+  if (trampoline_addr == (unsigned long) -1)
+    output << "-1;\n";
   else
-    ctx->output << "0x" << hex << ctx->stp_kretprobe_trampoline_addr << dec
-		<< ";\n";
+    output << "0x" << hex << trampoline_addr << dec << ";\n";
 
   // Some nonexistent modules may have been identified with "-d".  Note them.
   if (! s.suppress_warnings)
-    for (set<string>::iterator it = ctx->undone_unwindsym_modules.begin();
-	 it != ctx->undone_unwindsym_modules.end();
-	 it ++)
+    for (set<string>::const_iterator it = undone.begin ();
+	 it != undone.end (); ++it)
       s.print_warning (_("missing unwind/symbol data for module '")
 		       + (*it) + "'");
 }

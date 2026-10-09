@@ -15,16 +15,19 @@
 #include <locale.h>
 #endif
 
+#include <atomic>
 #include <list>
 #include <string>
 #include <vector>
 #include <iostream>
 #include <sstream>
 #include <map>
+#include <mutex>
 #include <set>
 #include <stdexcept>
 
 extern "C" {
+#include <sys/resource.h>
 #include <signal.h>
 #include <elfutils/libdw.h>
 #include <pwd.h>
@@ -33,6 +36,7 @@ extern "C" {
 #include "privilege.h"
 #include "staputil.h"
 #include "stringtable.h"
+#include "staptree.h" /* semantic_error */
 
 /* statistical operations used with a global */
 #define STAT_OP_NONE      1 << 0
@@ -63,8 +67,10 @@ struct vma_tracker_derived_probe_group;
 struct timer_derived_probe_group;
 struct netfilter_derived_probe_group;
 struct profile_derived_probe_group;
-struct mark_derived_probe_group;
 struct tracepoint_derived_probe_group;
+struct syscall_dispatch_derived_probe_group;
+struct lsm_derived_probe_group;
+struct xdp_derived_probe_group;
 struct hrtimer_derived_probe_group;
 struct procfs_derived_probe_group;
 struct dynprobe_derived_probe_group;
@@ -73,7 +79,6 @@ struct embeddedcode;
 struct stapdfa;
 class translator_output;
 struct unparser;
-struct semantic_error;
 struct module_cache;
 struct update_visitor;
 struct compile_server_cache;
@@ -125,7 +130,6 @@ struct parse_error: public std::runtime_error
       return errsrc + (chain ? "|" + chain->errsrc_chain() : "");
     }
 };
-
 
 struct symresolution_info;
 
@@ -223,7 +227,14 @@ public:
   bool save_uprobes;
   bool modname_given;
   bool keep_tmpdir;
+  // Like make -k for pass 2: keep elaborating after semantic_error,
+  // accumulate copies, dump a machine-parseable catalog at end of the
+  // pass, and still fail (rc != 0) if any errors occurred.  Does not
+  // change optional probe-point '?' semantics.
+  bool semantic_keep_going;
+  std::vector<semantic_error> saved_semantic_errors;
   bool guru_mode;
+  bool debug_build;
   bool bulk_mode;
   bool unoptimized;
   bool suppress_warnings;
@@ -407,8 +418,10 @@ public:
   timer_derived_probe_group* timer_derived_probes;
   netfilter_derived_probe_group* netfilter_derived_probes;
   profile_derived_probe_group* profile_derived_probes;
-  mark_derived_probe_group* mark_derived_probes;
   tracepoint_derived_probe_group* tracepoint_derived_probes;
+  syscall_dispatch_derived_probe_group* syscall_dispatch_derived_probes;
+  lsm_derived_probe_group* lsm_derived_probes;
+  xdp_derived_probe_group* xdp_derived_probes;
   hrtimer_derived_probe_group* hrtimer_derived_probes;
   procfs_derived_probe_group* procfs_derived_probes;
   dynprobe_derived_probe_group* dynprobe_derived_probes;
@@ -441,11 +454,21 @@ public:
   // NB: It is very important for all of the above (and below) fields
   // to be cleared in the systemtap_session ctor (session.cxx).
 
+  // Guards print_warning / print_error and their seen_* / suppressed_* counters.
+  std::mutex print_warning_mutex;
   std::set<std::string> seen_warnings;
   int suppressed_warnings;
   std::map<std::string, int> seen_errors; // NB: can change to a set if threshold is 1
   int suppressed_errors;
   int warningerr_count; // see comment in systemtap_session::print_error
+
+  // Guards mutative access to shared session containers touched during
+  // concurrent derive_probes() (files, unwindsym_modules, etc.).
+  std::recursive_mutex session_data_mutex;
+
+  // resource limits
+  std::map<int, struct rlimit> rlimits;
+  int apply_rlimits ();
 
   // Returns number of critical errors (not counting those part of warnings)
   unsigned num_errors ()
@@ -462,7 +485,10 @@ public:
 
   int target_namespaces_pid;
 
-  unsigned suppress_costly_diagnostics; /* set during processing of optional probes */
+  // Incremented while resolving optional/sufficient probe points; read by
+  // builders to skip expensive diagnostics. Atomic so concurrent
+  // find_and_build() calls from derive_probes_parallel are safe.
+  std::atomic<unsigned> suppress_costly_diagnostics;
 
   const token* last_token;
 
@@ -471,6 +497,7 @@ public:
 
   void print_token (std::ostream& o, const token* tok);
   void print_error (const semantic_error& e);
+  void dump_saved_semantic_errors ();
   std::string build_error_msg (const semantic_error& e);
   void print_error_source (std::ostream&, std::string&, const token* tok);
   void print_error_details (std::ostream&, std::string&, const semantic_error&);
@@ -524,7 +551,7 @@ struct exit_exception: public std::runtime_error
 
 
 // global counter of SIGINT/SIGTERM's received
-extern int pending_interrupts;
+extern std::atomic<int> pending_interrupts;
 
 // Interrupt exception subclass for catching
 // interrupts (i.e. ctrl-c).

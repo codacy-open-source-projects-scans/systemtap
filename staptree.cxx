@@ -150,14 +150,14 @@ probe::name () const
 
 
 probe_point::component::component ():
-  arg (0), from_glob(false), tok(0)
+  arg (0), from_glob(false), hidden(false), tok(0)
 {
 }
 
 
 probe_point::component::component (interned_string f,
-  literal * a, bool from_glob):
-    functor(f), arg(a), from_glob(from_glob), tok(0)
+  literal * a, bool from_glob, bool hidden):
+    functor(f), arg(a), from_glob(from_glob), hidden(hidden), tok(0)
 {
 }
 
@@ -223,6 +223,9 @@ functiondecl::join (systemtap_session& s)
 {
   if (!synthetic)
     throw SEMANTIC_ERROR (_("internal error, joining a non-synthetic function"), tok);
+  // Concurrent derive_probes (e.g. unlocked procfs_builder) may join
+  // helpers from multiple threads; protect the shared function maps.
+  lock_guard<recursive_mutex> gl (s.session_data_mutex);
   if (!s.functions.insert (make_pair (name, this)).second)
     throw SEMANTIC_ERROR (_F("synthetic function '%s' conflicts with an existing function",
                              name.to_string().c_str()), tok);
@@ -631,6 +634,19 @@ void enum_op::print (ostream& o) const
 }
 
 
+void enumname_op::print (ostream& o) const
+{
+  o << "@enumname(" << *operand;
+  if (type_name != "")
+    {
+      o << ", " << lex_cast_qstring (type_name);
+      if (module != "")
+        o << ", " << lex_cast_qstring (module);
+    }
+  o << ")";
+}
+
+
 void vardecl::print (ostream& o) const
 {
   o << ((unmangled_name != "") ? unmangled_name : name); // unmangled_name empty for some synthesized vardecls
@@ -723,6 +739,11 @@ void embedded_tags_visitor::visit_embedded_expr (embedded_expr *e)
 void embedded_tags_visitor::visit_enum_op (enum_op* e)
 {
   traversing_visitor::visit_enum_op(e);
+}
+
+void embedded_tags_visitor::visit_enumname_op (enumname_op* e)
+{
+  traversing_visitor::visit_enumname_op(e);
 }
 
 void functiondecl::printsigtags (ostream& o, bool all_tags) const
@@ -1499,11 +1520,11 @@ probe::collect_derivation_pp_chain (std::vector<probe_point*> &pp_list) const
 
 
 
-void probe_point::print (ostream& o, bool print_extras) const
+void probe_point::print (ostream& o, bool print_extras, bool print_hidden) const
 {
+  bool first = true;
   for (unsigned i=0; i<components.size(); i++)
     {
-      if (i>0) o << ".";
       probe_point::component* c = components[i];
       if (!c)
         {
@@ -1517,6 +1538,10 @@ void probe_point::print (ostream& o, bool print_extras) const
           } else
             continue; // ... sad panda decides to skip the bad boy
         }
+      if (c->hidden && !print_hidden)
+        continue;
+      if (!first) o << ".";
+      first = false;
       o << c->functor;
       if (c->arg)
         o << "(" << *c->arg << ")";
@@ -1531,10 +1556,10 @@ void probe_point::print (ostream& o, bool print_extras) const
     o<< " if (" << *condition << ")";
 }
 
-string probe_point::str (bool print_extras) const
+string probe_point::str (bool print_extras, bool print_hidden) const
 {
   ostringstream o;
-  print(o, print_extras);
+  print(o, print_extras, print_hidden);
   return o.str();
 }
 
@@ -1866,6 +1891,13 @@ void
 enum_op::visit (visitor* u)
 {
   u->visit_enum_op(this);
+}
+
+
+void
+enumname_op::visit (visitor* u)
+{
+  u->visit_enumname_op(this);
 }
 
 
@@ -2265,6 +2297,13 @@ traversing_visitor::visit_enum_op (enum_op* e)
 
 
 void
+traversing_visitor::visit_enumname_op (enumname_op* e)
+{
+  e->operand->visit (this);
+}
+
+
+void
 traversing_visitor::visit_arrayindex (arrayindex* e)
 {
   for (unsigned i=0; i<e->indexes.size(); i++)
@@ -2537,6 +2576,14 @@ expression_visitor::visit_enum_op (enum_op* e)
 
 
 void
+expression_visitor::visit_enumname_op (enumname_op* e)
+{
+  traversing_visitor::visit_enumname_op (e);
+  visit_expression (e);
+}
+
+
+void
 functioncall_traversing_visitor::visit_functioncall (functioncall* e)
 {
   traversing_visitor::visit_functioncall (e);
@@ -2654,6 +2701,13 @@ symuse_collecting_visitor::visit_enum_op (enum_op* e)
 
   // Treat enum constants as read symbols
   read_names.insert(e->operand->value);
+}
+
+
+void
+symuse_collecting_visitor::visit_enumname_op (enumname_op* e)
+{
+  e->operand->visit(this);
 }
 
 
@@ -2806,7 +2860,8 @@ varuse_collecting_visitor::visit_embedded_expr (embedded_expr *e)
       ! e->tagged_p ("/* myproc-unprivileged */"))
     throw SEMANTIC_ERROR (_F("embedded expression may not be used when --privilege=%s is specified",
 			     pr_name (session.privilege)),
-			  e->tok);
+			  e->tok,
+			  current_function ? current_function->tok : 0);
 
   // Don't allow /* guru */ functions unless -g is active.
   if (!session.guru_mode && e->tagged_p ("/* guru */"))
@@ -2924,6 +2979,13 @@ void
 varuse_collecting_visitor::visit_enum_op (enum_op *e)
 {
   functioncall_traversing_visitor::visit_enum_op (e);
+}
+
+
+void
+varuse_collecting_visitor::visit_enumname_op (enumname_op *e)
+{
+  functioncall_traversing_visitor::visit_enumname_op (e);
 }
 
 
@@ -3455,6 +3517,13 @@ throwing_visitor::visit_enum_op (enum_op* e)
 
 
 void
+throwing_visitor::visit_enumname_op (enumname_op* e)
+{
+  throwone (e->tok);
+}
+
+
+void
 throwing_visitor::visit_arrayindex (arrayindex* e)
 {
   throwone (e->tok);
@@ -3798,6 +3867,14 @@ update_visitor::visit_enum_op (enum_op* e)
   provide (e);
 }
 
+
+void
+update_visitor::visit_enumname_op (enumname_op* e)
+{
+  replace (e->operand);
+  provide (e);
+}
+
 void
 update_visitor::visit_arrayindex (arrayindex* e)
 {
@@ -4094,6 +4171,13 @@ void
 deep_copy_visitor::visit_enum_op (enum_op* e)
 {
   update_visitor::visit_enum_op(new enum_op(*e));
+}
+
+
+void
+deep_copy_visitor::visit_enumname_op (enumname_op* e)
+{
+  update_visitor::visit_enumname_op(new enumname_op(*e));
 }
 
 void

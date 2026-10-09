@@ -66,6 +66,17 @@ static inline int _stp_is_compat_task(void)
  */
 #include <asm/processor.h>
 #include <asm/ptrace.h>
+#if defined(__i386__) || defined(__x86_64__)
+#include <asm/msr.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7,2,0)
+#ifndef rdmsrl
+#define rdmsrl(msr, val) rdmsrq((msr), (val))
+#endif
+#ifndef wrmsrl
+#define wrmsrl(msr, val) wrmsrq((msr), (val))
+#endif
+#endif
+#endif
 #include <linux/sched.h>
 #if defined(STAPCONF_LINUX_SCHED_HEADERS)
 #include <linux/sched/task_stack.h>

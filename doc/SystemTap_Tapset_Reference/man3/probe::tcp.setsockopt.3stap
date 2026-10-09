@@ -2,12 +2,12 @@
 .\"     Title: probe::tcp.setsockopt
 .\"    Author: 
 .\" Generator: DocBook XSL Stylesheets vsnapshot <http://docbook.sf.net/>
-.\"      Date: October 2025
+.\"      Date: September 2026
 .\"    Manual: Networking Tapset
-.\"    Source: SystemTap Tapset Reference
+.\"    Source: SystemTap Tapset Reference Version 5.6
 .\"  Language: English
 .\"
-.TH "PROBE::TCP\&.SETSOCK" "3stap" "October 2025" "SystemTap Tapset Reference" "Networking Tapset"
+.TH "PROBE::TCP\&.SETSOCK" "3stap" "September 2026" "SystemTap Tapset Reference Ver" "Networking Tapset"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -32,18 +32,13 @@ probe::tcp.setsockopt \- Call to \fBsetsockopt\fR
 .SH "SYNOPSIS"
 .sp
 .nf
-tcp\&.setsockopt 
+probe tcp\&.setsockopt {}
 .fi
 .SH "VALUES"
 .PP
-\fIsock\fR
+\fIoptstr\fR
 .RS 4
-Network socket
-.RE
-.PP
-\fIoptname\fR
-.RS 4
-TCP socket options (e\&.g\&. TCP_NODELAY, TCP_MAXSEG, etc)
+Resolves optname to a human\-readable format
 .RE
 .PP
 \fIoptlen\fR
@@ -57,9 +52,9 @@ Used to access values for
 IP address family
 .RE
 .PP
-\fIoptstr\fR
+\fIlevel\fR
 .RS 4
-Resolves optname to a human\-readable format
+The level at which the socket options will be manipulated
 .RE
 .PP
 \fIname\fR
@@ -67,9 +62,14 @@ Resolves optname to a human\-readable format
 Name of this probe
 .RE
 .PP
-\fIlevel\fR
+\fIoptname\fR
 .RS 4
-The level at which the socket options will be manipulated
+TCP socket options (e\&.g\&. TCP_NODELAY, TCP_MAXSEG, etc)
+.RE
+.PP
+\fIsock\fR
+.RS 4
+Network socket
 .RE
 .SH "CONTEXT"
 .PP

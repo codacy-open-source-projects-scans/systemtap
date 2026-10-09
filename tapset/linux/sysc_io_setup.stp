@@ -28,8 +28,8 @@
 	  set_pointer_arg(2, ctxp_uaddr)
 %)
 
-probe syscall.io_setup = dw_syscall.io_setup !, nd_syscall.io_setup ? {}
-probe syscall.io_setup.return = dw_syscall.io_setup.return !, nd_syscall.io_setup.return ? {}
+probe syscall.io_setup = tp_syscall.io_setup !, dw_syscall.io_setup !, nd_syscall.io_setup ? {}
+probe syscall.io_setup.return = tp_syscall.io_setup.return !, dw_syscall.io_setup.return !, nd_syscall.io_setup.return ? {}
 
 # dw_io_setup _____________________________________________________
 
@@ -69,7 +69,7 @@ probe __syscall.io_setup.return = kernel.function("sys_io_setup").return
 probe nd_syscall.io_setup = nd1_syscall.io_setup!, nd2_syscall.io_setup!, tp_syscall.io_setup
   { }
 
-probe nd1_syscall.io_setup = __nd1_syscall.io_setup,
+probe nd1_syscall.io_setup = __nd1_syscall.io_setup ?,
 	kprobe.function("compat_sys_io_setup") ?
 {
 	asmlinkage()
@@ -95,10 +95,10 @@ probe nd2_syscall.io_setup = kprobe.function(@arch_syscall_prefix "sys_io_setup"
         %( @_IS_SREG_KERNEL %? @_SYSCALL_IO_SETUP_REGARGS_STORE %)
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.io_setup = kernel.trace("sys_enter")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.io_setup = tp_syscall("io_setup,~compat_io_setup") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_compat_gate(@const("__NR_io_setup"), @const("__NR_compat_io_setup"))
 	@_SYSCALL_IO_SETUP_NAME
 	@_SYSCALL_IO_SETUP_REGARGS
@@ -111,7 +111,7 @@ probe tp_syscall.io_setup = kernel.trace("sys_enter")
 probe nd_syscall.io_setup.return = nd1_syscall.io_setup.return!, nd2_syscall.io_setup.return!, tp_syscall.io_setup.return
   { }
   
-probe nd1_syscall.io_setup.return = __nd1_syscall.io_setup.return,
+probe nd1_syscall.io_setup.return = __nd1_syscall.io_setup.return ?,
 	kprobe.function("compat_sys_io_setup").return ?
 {
 	@_SYSCALL_IO_SETUP_NAME
@@ -130,11 +130,11 @@ probe nd2_syscall.io_setup.return = kprobe.function(@arch_syscall_prefix "sys_io
 	@SYSC_RETVALSTR(returnval())
 }
  
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.io_setup.return = kernel.trace("sys_exit")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.io_setup.return = tp_syscall("io_setup,~compat_io_setup").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_compat_gate(@const("__NR_io_setup"), @const("__NR_compat_io_setup"))
 	@_SYSCALL_IO_SETUP_NAME
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }

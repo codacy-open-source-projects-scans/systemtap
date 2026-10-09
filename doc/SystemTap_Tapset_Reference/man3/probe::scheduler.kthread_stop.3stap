@@ -2,12 +2,12 @@
 .\"     Title: probe::scheduler.kthread_stop
 .\"    Author: 
 .\" Generator: DocBook XSL Stylesheets vsnapshot <http://docbook.sf.net/>
-.\"      Date: October 2025
+.\"      Date: September 2026
 .\"    Manual: Scheduler Tapset
-.\"    Source: SystemTap Tapset Reference
+.\"    Source: SystemTap Tapset Reference Version 5.6
 .\"  Language: English
 .\"
-.TH "PROBE::SCHEDULER\&.K" "3stap" "October 2025" "SystemTap Tapset Reference" "Scheduler Tapset"
+.TH "PROBE::SCHEDULER\&.K" "3stap" "September 2026" "SystemTap Tapset Reference Ver" "Scheduler Tapset"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -32,18 +32,18 @@ probe::scheduler.kthread_stop \- A thread created by kthread_create is being sto
 .SH "SYNOPSIS"
 .sp
 .nf
-scheduler\&.kthread_stop 
+probe scheduler\&.kthread_stop {}
 .fi
 .SH "VALUES"
-.PP
-\fIthread_pid\fR
-.RS 4
-PID of the thread being stopped
-.RE
 .PP
 \fIthread_priority\fR
 .RS 4
 priority of the thread
+.RE
+.PP
+\fIthread_pid\fR
+.RS 4
+PID of the thread being stopped
 .RE
 .SH SEE ALSO\n 
 .IR tapset::scheduler (3stap)

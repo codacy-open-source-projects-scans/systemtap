@@ -31,8 +31,8 @@
 	  set_pointer_arg(2, tp_uaddr)
 %)
 
-probe syscall.clock_settime = dw_syscall.clock_settime !, nd_syscall.clock_settime ? {}
-probe syscall.clock_settime.return = dw_syscall.clock_settime.return !, nd_syscall.clock_settime.return ? {}
+probe syscall.clock_settime = tp_syscall.clock_settime !, dw_syscall.clock_settime !, nd_syscall.clock_settime ? {}
+probe syscall.clock_settime.return = tp_syscall.clock_settime.return !, dw_syscall.clock_settime.return !, nd_syscall.clock_settime.return ? {}
 
 # dw_clock_settime _____________________________________________________
 
@@ -56,7 +56,13 @@ probe __syscall.compat_clock_settime =
 	clk_id = __int32($which_clock)
 	clk_id_str = _get_wc_str(__int32($which_clock))
 	tp_uaddr = $tp
-	tp_uaddr_str = _struct_compat_timespec_u(tp_uaddr, 1)
+	%( CONFIG_COMPAT_32BIT_TIME == "y" %?
+		tp_uaddr_str = _struct_compat_timespec_u(tp_uaddr, 1)
+		try { if (_stp_syscall_nr() == @const("__NR_compat_clock_settime64")) tp_uaddr_str = _struct_timespec_u(tp_uaddr, 1) } catch { }
+	%:
+		tp_uaddr_str = _struct_timespec_u(tp_uaddr, 1)
+	%)
+
 	@_SYSCALL_CLOCK_SETTIME_ARGSTR
 }
 probe dw_syscall.clock_settime.return = __syscall.clock_settime.return,
@@ -81,12 +87,12 @@ probe __syscall.compat_clock_settime.return =
 probe nd_syscall.clock_settime = nd1_syscall.clock_settime!, nd2_syscall.clock_settime!, tp_syscall.clock_settime
   { }
 
-probe nd1_syscall.clock_settime = __nd1_syscall.clock_settime,
+probe nd1_syscall.clock_settime = __nd1_syscall.clock_settime ?,
 	__nd1_syscall.compat_clock_settime ?
 {
 	@_SYSCALL_CLOCK_SETTIME_NAME
 }
-probe __nd1_syscall.clock_settime = kprobe.function("sys_clock_settime").call
+probe __nd1_syscall.clock_settime = kprobe.function("sys_clock_settime").call ?
 {
 	@__syscall_gate(@const("__NR_clock_settime"))
 	asmlinkage()
@@ -94,12 +100,18 @@ probe __nd1_syscall.clock_settime = kprobe.function("sys_clock_settime").call
 	tp_uaddr_str = _struct_timespec_u(tp_uaddr, 1)
 	@_SYSCALL_CLOCK_SETTIME_ARGSTR
 }
-probe __nd1_syscall.compat_clock_settime =
+probe __nd1_syscall.compat_clock_settime = 
 	kprobe.function("compat_sys_clock_settime").call ?
 {
 	asmlinkage()
 	@_SYSCALL_CLOCK_SETTIME_REGARGS
-	tp_uaddr_str = _struct_compat_timespec_u(tp_uaddr, 1)
+	%( CONFIG_COMPAT_32BIT_TIME == "y" %?
+		tp_uaddr_str = _struct_compat_timespec_u(tp_uaddr, 1)
+		try { if (_stp_syscall_nr() == @const("__NR_compat_clock_settime64")) tp_uaddr_str = _struct_timespec_u(tp_uaddr, 1) } catch { }
+	%:
+		tp_uaddr_str = _struct_timespec_u(tp_uaddr, 1)
+	%)
+
 	@_SYSCALL_CLOCK_SETTIME_ARGSTR
 }
 
@@ -124,23 +136,34 @@ probe __nd2_syscall.compat_clock_settime =
 {
 	__set_syscall_pt_regs(pointer_arg(1))
 	@_SYSCALL_CLOCK_SETTIME_REGARGS
-	tp_uaddr_str = _struct_compat_timespec_u(tp_uaddr, 1)
+	%( CONFIG_COMPAT_32BIT_TIME == "y" %?
+		tp_uaddr_str = _struct_compat_timespec_u(tp_uaddr, 1)
+		try { if (_stp_syscall_nr() == @const("__NR_compat_clock_settime64")) tp_uaddr_str = _struct_timespec_u(tp_uaddr, 1) } catch { }
+	%:
+		tp_uaddr_str = _struct_timespec_u(tp_uaddr, 1)
+	%)
+
 	@_SYSCALL_CLOCK_SETTIME_ARGSTR
 },
 {
         %( @_IS_SREG_KERNEL %? @_SYSCALL_CLOCK_SETTIME_REGARGS_STORE %)
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.clock_settime = kernel.trace("sys_enter")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.clock_settime = tp_syscall("clock_settime,~compat_clock_settime,~compat_clock_settime64") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
-	@__syscall_compat_gate(@const("__NR_clock_settime"), @const("__NR_compat_clock_settime"))
+	@__set_syscall_pt_regs
+	@__syscall_compat_gate2(@const("__NR_clock_settime"), @const("__NR_compat_clock_settime"), @const("__NR_compat_clock_settime64"))
 	@_SYSCALL_CLOCK_SETTIME_NAME
 	@_SYSCALL_CLOCK_SETTIME_REGARGS
-	if (@__compat_task)
-		tp_uaddr_str = _struct_compat_timespec_u(tp_uaddr, 1)
-	else
+	if (@__compat_task) {
+		%( CONFIG_COMPAT_32BIT_TIME == "y" %?
+			tp_uaddr_str = _struct_compat_timespec_u(tp_uaddr, 1)
+			try { if (_stp_syscall_nr() == @const("__NR_compat_clock_settime64")) tp_uaddr_str = _struct_timespec_u(tp_uaddr, 1) } catch { }
+		%:
+			tp_uaddr_str = _struct_timespec_u(tp_uaddr, 1)
+		%)
+	} else
 		tp_uaddr_str = _struct_timespec_u(tp_uaddr, 1)
 	@_SYSCALL_CLOCK_SETTIME_ARGSTR
 },
@@ -151,18 +174,18 @@ probe tp_syscall.clock_settime = kernel.trace("sys_enter")
 probe nd_syscall.clock_settime.return = nd1_syscall.clock_settime.return!, nd2_syscall.clock_settime.return!, tp_syscall.clock_settime.return
   { }
 
-probe nd1_syscall.clock_settime.return = __nd1_syscall.clock_settime.return,
+probe nd1_syscall.clock_settime.return = __nd1_syscall.clock_settime.return ?,
 	__nd1_syscall.compat_clock_settime.return ?
 {
  	@_SYSCALL_CLOCK_SETTIME_NAME
 }
-probe __nd1_syscall.clock_settime.return =
-	kprobe.function("sys_clock_settime").return
+probe __nd1_syscall.clock_settime.return = 
+	kprobe.function("sys_clock_settime").return ?
 {
 	@__syscall_gate(@const("__NR_clock_settime"))
 	@SYSC_RETVALSTR(returnval())
 }
-probe __nd1_syscall.compat_clock_settime.return =
+probe __nd1_syscall.compat_clock_settime.return = 
 	kprobe.function("compat_sys_clock_settime").return ?
 {
 	@SYSC_RETVALSTR(returnval())
@@ -176,11 +199,11 @@ probe nd2_syscall.clock_settime.return = kprobe.function(@arch_syscall_prefix "s
 	@SYSC_RETVALSTR(returnval())
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.clock_settime.return = kernel.trace("sys_exit")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.clock_settime.return = tp_syscall("clock_settime,~compat_clock_settime,~compat_clock_settime64").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
-	@__syscall_compat_gate(@const("__NR_clock_settime"), @const("__NR_compat_clock_settime"))
+	@__set_syscall_pt_regs
+	@__syscall_compat_gate2(@const("__NR_clock_settime"), @const("__NR_compat_clock_settime"), @const("__NR_compat_clock_settime64"))
 	@_SYSCALL_CLOCK_SETTIME_NAME
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }

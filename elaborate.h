@@ -21,6 +21,7 @@
 #include <sstream>
 #include <map>
 #include <list>
+#include <mutex>
 
 extern "C" {
 #include <elfutils/libdw.h>
@@ -179,6 +180,7 @@ struct typeresolution_info: public visitor
   void visit_entry_op (entry_op* e);
   void visit_perf_op (perf_op* e);
   void visit_enum_op (enum_op* e);
+  void visit_enumname_op (enumname_op* e);
 
   // PR24199 NB: above functions should NOT throw exceptions on a
   // routine type resolution failure.  Instead, session.print_error()
@@ -347,23 +349,53 @@ typedef std::map<interned_string, literal*> literal_map_t;
 
 struct derived_probe_builder
 {
-  virtual void build(systemtap_session & sess,
+  // Returns a fresh result vector (never mutates a caller-owned
+  // accumulator).  Nested helpers may still take a local vector& sink.
+  virtual std::vector<derived_probe*> build(systemtap_session & sess,
 		     probe* base,
 		     probe_point* location,
-		     literal_map_t const & parameters,
-		     std::vector<derived_probe*> & finished_results) = 0;
-  virtual void build_with_suffix(systemtap_session & sess,
+		     literal_map_t const & parameters) = 0;
+  virtual std::vector<derived_probe*> build_with_suffix(systemtap_session & sess,
                                  probe * use,
                                  probe_point * location,
                                  literal_map_t const & parameters,
-                                 std::vector<derived_probe *>
-                                   & finished_results,
                                  std::vector<probe_point::component *>
                                    const & suffix);
   virtual ~derived_probe_builder() {}
   virtual void build_no_more (systemtap_session &) {}
   virtual bool is_alias () const { return false; }
   virtual std::string name() = 0;
+
+  // When true (default), run_build() / run_build_with_suffix() hold
+  // lock across the virtual build* call.  Builders may temporarily
+  // release it (see temporarily_release_builder_lock) around nested
+  // derive_probes / derive_probes_parallel.  Simple builders with no
+  // mutable member state may return false; they must still protect
+  // any shared session mutations via session_data_mutex.
+  virtual bool serialize_builds () const { return true; }
+
+  // Coarse lock for concurrent derive_probes().  Recursive because
+  // alias/glob/python/java paths re-enter derive_probes on the same
+  // builder from the same thread.  By default each builder owns its
+  // lock; dwarf-family builders (dwarf/tracepoint/btf) share one so
+  // they serialize against setup_dwfl / module_cache / session tables.
+  std::recursive_mutex own_lock;
+  std::recursive_mutex& lock;
+  derived_probe_builder (): lock (own_lock) {}
+  explicit derived_probe_builder (std::recursive_mutex& shared): lock (shared) {}
+
+  // match_node entry points: take lock (if serialize_builds) then
+  // invoke the virtual build / build_with_suffix.
+  std::vector<derived_probe*> run_build(systemtap_session & sess,
+                 probe* base,
+                 probe_point* location,
+                 literal_map_t const & parameters);
+  std::vector<derived_probe*> run_build_with_suffix(systemtap_session & sess,
+                             probe * use,
+                             probe_point * location,
+                             literal_map_t const & parameters,
+                             std::vector<probe_point::component *>
+                               const & suffix);
 
   static bool has_null_param (literal_map_t const & parameters,
                               interned_string key);
@@ -373,6 +405,28 @@ struct derived_probe_builder
                          interned_string key, int64_t& value);
   static bool has_param (literal_map_t const & parameters,
                          interned_string key);
+};
+
+
+// RAII: drop this builder's serialize lock for a nested derive window,
+// then reacquire.  No-op when serialize_builds() is false.  Assumes the
+// calling thread already holds exactly one run_build lock level.
+struct temporarily_release_builder_lock
+{
+  std::recursive_mutex* m;
+  explicit temporarily_release_builder_lock (derived_probe_builder& b)
+    : m (b.serialize_builds () ? &b.lock : 0)
+  {
+    if (m)
+      m->unlock ();
+  }
+  ~temporarily_release_builder_lock ()
+  {
+    if (m)
+      m->lock ();
+  }
+  temporarily_release_builder_lock (const temporarily_release_builder_lock&) = delete;
+  temporarily_release_builder_lock& operator= (const temporarily_release_builder_lock&) = delete;
 };
 
 
@@ -442,17 +496,14 @@ alias_expansion_builder
     : alias(a)
   {}
 
-  virtual void build(systemtap_session & sess,
+  virtual std::vector<derived_probe*> build(systemtap_session & sess,
 		     probe * use,
 		     probe_point * location,
-		     literal_map_t const &,
-		     std::vector<derived_probe *> & finished_results);
-  virtual void build_with_suffix(systemtap_session & sess,
+		     literal_map_t const &);
+  virtual std::vector<derived_probe*> build_with_suffix(systemtap_session & sess,
                                  probe * use,
                                  probe_point * location,
                                  literal_map_t const &,
-                                 std::vector<derived_probe *>
-                                   & finished_results,
                                  std::vector<probe_point::component *>
                                    const & suffix);
   virtual bool is_alias () const { return true; }
@@ -466,9 +517,20 @@ alias_expansion_builder
 /* struct systemtap_session moved to session.h */
 
 int semantic_pass (systemtap_session& s);
-void derive_probes (systemtap_session& s,
-                    probe *p, std::vector<derived_probe*>& dps,
-                    bool optional = false, bool rethrow_errors = false);
+// Derive probes for one script probe; returns a fresh result vector
+// (never mutates a caller-owned / shared accumulator).
+std::vector<derived_probe*> derive_probes (systemtap_session& s,
+                                           probe *p,
+                                           bool optional = false,
+                                           bool rethrow_errors = false);
+// Derive each probe concurrently.  results[i] corresponds to probes[i].
+// max_threads 0 means stap_nthreads(); otherwise the pool is limited to
+// min(max_threads, stap_nthreads(), probes.size()).
+std::vector<std::vector<derived_probe*> >
+derive_probes_parallel (systemtap_session& s,
+                        const std::vector<probe*>& probes,
+                        bool optional = false,
+                        unsigned max_threads = 0);
 
 // A helper we use here and in translate, for pulling symbols out of lvalue
 // expressions.

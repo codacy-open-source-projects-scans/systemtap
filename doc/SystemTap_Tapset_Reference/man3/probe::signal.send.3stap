@@ -2,12 +2,12 @@
 .\"     Title: probe::signal.send
 .\"    Author: 
 .\" Generator: DocBook XSL Stylesheets vsnapshot <http://docbook.sf.net/>
-.\"      Date: October 2025
+.\"      Date: September 2026
 .\"    Manual: Signal Tapset
-.\"    Source: SystemTap Tapset Reference
+.\"    Source: SystemTap Tapset Reference Version 5.6
 .\"  Language: English
 .\"
-.TH "PROBE::SIGNAL\&.SEND" "3stap" "October 2025" "SystemTap Tapset Reference" "Signal Tapset"
+.TH "PROBE::SIGNAL\&.SEND" "3stap" "September 2026" "SystemTap Tapset Reference Ver" "Signal Tapset"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -32,23 +32,13 @@ probe::signal.send \- Signal being sent to a process
 .SH "SYNOPSIS"
 .sp
 .nf
-signal\&.send 
+probe signal\&.send {}
 .fi
 .SH "VALUES"
 .PP
-\fIsig_name\fR
+\fIsinfo\fR
 .RS 4
-A string representation of the signal
-.RE
-.PP
-\fItask\fR
-.RS 4
-A task handle to the signal recipient
-.RE
-.PP
-\fIshared\fR
-.RS 4
-Indicates whether the signal is shared by the thread group
+The address of siginfo struct
 .RE
 .PP
 \fIsig_pid\fR
@@ -56,14 +46,14 @@ Indicates whether the signal is shared by the thread group
 The PID of the process receiving the signal
 .RE
 .PP
-\fIsi_code\fR
+\fIname\fR
 .RS 4
-Indicates the signal type
+The name of the function used to send out the signal
 .RE
 .PP
-\fIsig\fR
+\fIsig_name\fR
 .RS 4
-The number of the signal
+A string representation of the signal
 .RE
 .PP
 \fIsend2queue\fR
@@ -71,19 +61,29 @@ The number of the signal
 Indicates whether the signal is sent to an existing sigqueue (deprecated in SystemTap 2\&.1)
 .RE
 .PP
+\fIsi_code\fR
+.RS 4
+Indicates the signal type
+.RE
+.PP
+\fIshared\fR
+.RS 4
+Indicates whether the signal is shared by the thread group
+.RE
+.PP
 \fIpid_name\fR
 .RS 4
 The name of the signal recipient
 .RE
 .PP
-\fIsinfo\fR
+\fItask\fR
 .RS 4
-The address of siginfo struct
+A task handle to the signal recipient
 .RE
 .PP
-\fIname\fR
+\fIsig\fR
 .RS 4
-The name of the function used to send out the signal
+The number of the signal
 .RE
 .SH "CONTEXT"
 .PP

@@ -2,12 +2,12 @@
 .\"     Title: probe::nfsd.proc.remove
 .\"    Author: 
 .\" Generator: DocBook XSL Stylesheets vsnapshot <http://docbook.sf.net/>
-.\"      Date: October 2025
+.\"      Date: September 2026
 .\"    Manual: Network File Storage Tapsets
-.\"    Source: SystemTap Tapset Reference
+.\"    Source: SystemTap Tapset Reference Version 5.6
 .\"  Language: English
 .\"
-.TH "PROBE::NFSD\&.PROC\&" "3stap" "October 2025" "SystemTap Tapset Reference" "Network File Storage Tapsets"
+.TH "PROBE::NFSD\&.PROC\&" "3stap" "September 2026" "SystemTap Tapset Reference Ver" "Network File Storage Tapsets"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -32,13 +32,38 @@ probe::nfsd.proc.remove \- NFS server removing a file for client
 .SH "SYNOPSIS"
 .sp
 .nf
-nfsd\&.proc\&.remove 
+probe nfsd\&.proc\&.remove {}
 .fi
 .SH "VALUES"
+.PP
+\fIfh\fR
+.RS 4
+file handle (the first part is the length of the file handle)
+.RE
+.PP
+\fIproto\fR
+.RS 4
+transfer protocol
+.RE
+.PP
+\fIclient_ip\fR
+.RS 4
+the ip address of client
+.RE
 .PP
 \fIuid\fR
 .RS 4
 requester\*(Aqs user id
+.RE
+.PP
+\fIfilelen\fR
+.RS 4
+length of file name
+.RE
+.PP
+\fIversion\fR
+.RS 4
+nfs version
 .RE
 .PP
 \fIgid\fR
@@ -49,31 +74,6 @@ requester\*(Aqs group id
 \fIfilename\fR
 .RS 4
 file name
-.RE
-.PP
-\fIfh\fR
-.RS 4
-file handle (the first part is the length of the file handle)
-.RE
-.PP
-\fIclient_ip\fR
-.RS 4
-the ip address of client
-.RE
-.PP
-\fIproto\fR
-.RS 4
-transfer protocol
-.RE
-.PP
-\fIversion\fR
-.RS 4
-nfs version
-.RE
-.PP
-\fIfilelen\fR
-.RS 4
-length of file name
 .RE
 .SH SEE ALSO\n 
 .IR tapset::nfsd (3stap)

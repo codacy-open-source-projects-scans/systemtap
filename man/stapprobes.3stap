@@ -166,15 +166,19 @@ l l l.
 \fBDWARF	NON-DWARF	SYMBOL-TABLE\fP
 
 kernel.function, .statement	kernel.mark	kernel.function\fI*\fP
-module.function, .statement	process.mark, process.plt	module.function\fI*\fP
+module.function, .statement, .tracepoint	process.mark, process.plt	module.function\fI*\fP
 process.function, .statement	begin, end, error, never	process.function\fI*\fP
 process.mark\fI*\fP	timer
 \.function.callee	perf
-python2, python3	procfs
+python3	procfs
 debuginfod	kernel.statement.absolute
 	kernel.data
 \fBAUTO-GENERATED-DWARF\fP	kprobe.function
 kernel.trace	process.statement.absolute
+kernel.tracepoint
+tp_syscall
+kernel.lsm
+kernel.xdp
 	process.begin, .end
 	netfilter
 	java
@@ -550,6 +554,12 @@ The first part is the name of a function, as would appear in the
 .I nm
 program's output.  This part may use the "*" and "?" wildcarding
 operators to match multiple names.
+Kernel builds may also expose linker stubs named with a
+\fB__pfx_\fR prefix (e.g. \fB__pfx_sys_read\fR beside \fBsys_read\fR).
+Those stubs are omitted from wildcard matches unless the PATTERN
+explicitly requests them (an exact \fB__pfx_…\fR name, or a wildcard
+that begins with \fB__pfx\fR or otherwise contains \fB__pfx_\fR, such as
+\fB__pfx_*\fR or \fB*__pfx_*\fR).
 .IP \(bu 4
 The second part is optional and begins with the "@" character. 
 It is followed by the path to the source file containing the function,
@@ -1428,6 +1438,329 @@ and a string of name=value pairs for all parameters of the tracepoint
 is available in
 .BR $$vars " or " $$parms .
 
+.SS BTF TRACEPOINTS
+
+This family of probe points also hooks up to kernel and module
+tracepoints, but discovers them from
+.BR btf_trace_* callback typedefs
+rather than from trace event header files.  The kernel catalog comes
+from
+.BR vmlinux.h
+in the kernel build tree (requires
+.BR CONFIG_DEBUG_INFO_BTF ).
+Module tracepoints are discovered from the module's debuginfo when it
+contains matching
+.BR btf_trace_*
+typedefs (typical when
+.BR CONFIG_DEBUG_INFO_BTF_MODULES
+is enabled).
+
+Kernel probes look like:
+.BR kernel.tracepoint("name") .
+Module probes look like:
+.BR module("modname").tracepoint("name") .
+The name string may contain the usual wildcard characters.  Unlike
+.BR kernel.trace() ,
+these probes do
+.B not
+use
+.BR system:name
+syntax; specify only the tracepoint registration name (for example
+.BR sched_switch ,
+not
+.BR sched:sched_switch ).
+
+Handler arguments are positional and numbered from one:
+.BR $arg1 ,
+.BR $arg2 ,
+and so on, derived from the callback typedef in
+.BR vmlinux.h
+or module debuginfo.  The leading
+.BR "void *"
+cookie parameter is omitted.  Named parameters from
+.BR TP_PROTO
+are not available on this probe type; use
+.BR kernel.trace("system:name")
+if you need those names.
+
+The tracepoint name is available in
+.BR $$name .
+.BR $$system
+is always empty for BTF tracepoint probes.
+A string of name=value pairs for usable arguments is available in
+.BR $$vars " or " $$parms .
+
+Example uses:
+.PP
+.nf
+# Kernel tracepoint by registration name
+probe kernel.tracepoint("sched_switch") {
+  printf("preempt=%d cpu=%d\\n", $arg1, $arg4)
+}
+
+# Module tracepoint (module debuginfo required)
+probe module("nfs").tracepoint("nfs_getattr_enter") {
+  printf("inode=%d\\n", $arg1)
+}
+
+# List available kernel tracepoints
+$ stap -L 'kernel.tracepoint("sched_switch")'
+$ stap -l 'kernel.tracepoint("*")'
+.fi
+.PP
+
+.SS SYSCALL TRACEPOINT DISPATCH (tp_syscall)
+
+.BR tp_syscall("name")
+and
+.BR tp_syscall("name").return
+attach to the raw
+.BR sys_enter
+/
+.BR sys_exit
+tracepoints (BTF
+.BR kernel.tracepoint()
+catalog, requiring
+.BR vmlinux.h )
+but
+.I dispatch
+in generated C with a
+.BR switch
+on
+.BR __NR_name .
+Unmarked names are looked up in the native syscall table.
+
+Unfortunately, the full treatment of duplication, aliases, overlap, and backward-compatibility
+in kernel syscall numbering sometimes requires addition of special markup to make the decoder
+routine's work straightforward (and require no hard-coded heuristics in the translator).  A
+.B ~
+prefix selects the compat-task table instead
+.RB ( tp_syscall("~compat_read") ,
+.BR tp_syscall("~ia32_truncate64") ,
+or
+.BR tp_syscall("~fadvise64")
+when that table reuses the native number).
+There is no automatic
+.B compat_
+or
+.B ia32_
+rewrite of the identifier.
+Aliases that share an NR token share that
+.BR case ;
+a probe that lists several numbers has its handler call replicated
+on each label.  Native and compat ABIs use separate switches
+.RB ( _stp_is_compat_task() )
+because they reuse the same small integers.  Several names may be listed in one string
+.RB ( tp_syscall("chown,chown32,~compat_chown32") )
+to match extra NR tokens; names listed together on one probe share a
+case if their NRs coincide.  Use
+.B =
+to declare a merge-only alias that may have the same number as another
+probe's token, without matching that other name
+.RB ( tp_syscall("umount2=umount,~compat_umount2=compat_umount") ).
+The left-hand name is preferred as the
+.B case
+label.  Several
+.BR tp_syscall()
+probes in one script share a single tracepoint registration instead of
+N isolated
+.BR next
+filters concatenated by probe combining.
+.B tp_syscall("name").return
+supports
+.BR @entry()
+the same way as kretprobes: a synthetic
+.B tp_syscall("name")
+sibling records the operand at
+.BR sys_enter .
+
+Tapset aliases such as
+.BR tp_syscall.read
+expand to
+.BR tp_syscall("read,~compat_read")
+with a
+.BR kernel.trace("sys_enter")
+fallback.  Handler arguments are the same positional
+.BR $arg1
+\&... as
+.BR kernel.tracepoint("sys_enter")
+(typically
+.BR pt_regs
+then syscall id).  The usual tapset
+.BR name
+/
+.BR argstr
+locals are filled after dispatch.
+
+Example:
+.PP
+.nf
+probe tp_syscall("read"), tp_syscall("write") {
+  printf("syscall nr dispatch hit\\n")
+}
+.fi
+.PP
+Use the
+.BR tp_syscall.read
+tapset alias when you need
+.BR name
+/
+.BR argstr .
+
+.SS LSM (LINUX SECURITY MODULE) HOOKS
+
+This family of probe points, available with the BPF runtime
+.RB ( --runtime=bpf ),
+allows attaching to Linux Security Module hooks in the kernel.
+LSM hooks are called during security-sensitive operations and can be used
+to monitor or control access to files, sockets, processes, and other
+kernel resources. Requires Linux kernel 5.7 or later with
+.BR CONFIG_BPF_LSM=y
+and kernel headers for type information.
+
+LSM hook probes look like:
+.BR kernel.lsm("hook_name")
+or use the tapset aliases:
+.BR kernel.lsm.hook_name .
+The hook name specifies which security hook to attach to, such as
+.BR bprm_check_security " (program execution),"
+.BR file_open " (file opening),"
+.BR socket_create " (socket creation), etc."
+
+The tapset library provides typed pointer variables for each hook,
+accessible via
+.BR @cast()
+in guru mode. For example,
+.BR lsm.bprm_check_security
+provides
+.BR bprm
+(pointer to struct linux_binprm), while
+.BR lsm.file_open
+provides
+.BR file
+(pointer to struct file). All probes also provide
+.BR $ctx
+for raw context access.
+
+LSM probes can return values to allow or deny operations. In guru mode
+.RB ( -g ),
+set
+.BR $return " to 0"
+to allow the operation (default), or set it to a negative error code like
+.BR -EPERM " or " -EACCES
+to deny it. The kernel validates return values and uses them to enforce
+security policy.
+
+Example uses:
+.PP
+.nf
+# Monitor program execution
+probe lsm.bprm_check_security {
+  filename = kernel_string(bprm->filename)
+  printf("Executing: %s\\n", filename)
+}
+
+# Monitor file opening
+probe lsm.file_open {
+  pathname = d_path(&file->f_path)
+  printf("Opening: %s\\n", pathname)
+}
+
+# Block socket bind operations (guru mode)
+probe lsm.socket_bind {
+  $return = -1  # EPERM - deny all binds
+}
+.fi
+.PP
+
+Supported hook categories include:
+.IP \(bu 4
+Binary execution:
+.BR bprm_check_security ", " bprm_creds_for_exec
+.IP \(bu 4
+File operations:
+.BR file_open ", " file_permission ", " file_ioctl ", " file_lock
+.IP \(bu 4
+Inode operations:
+.BR inode_permission ", " inode_create ", " inode_unlink ", " inode_mkdir ", " inode_rmdir
+.IP \(bu 4
+Socket operations:
+.BR socket_create ", " socket_connect ", " socket_bind ", " socket_listen
+.IP \(bu 4
+Path operations:
+.BR path_unlink ", " path_mkdir ", " path_chmod ", " path_chown
+.IP \(bu 4
+Process/task:
+.BR task_alloc ", " task_free
+.IP \(bu 4
+Memory mapping:
+.BR mmap_file ", " file_mprotect
+.PP
+
+See
+.I tapset/bpf/lsm.stp
+for a complete list of available hooks and their typed pointer variables.
+
+.SS XDP PACKET-PROCESSING PROBES
+
+These probe points attach eXpress Data Path (XDP) programs to network
+interfaces, so a script can inspect each incoming packet very early and
+pass, drop, or bounce it. Requires
+.BR CONFIG_BPF_SYSCALL=y
+and an interface whose driver supports XDP.
+
+XDP probes look like
+.BR kernel.xdp("eth0")
+or the shorter bare form
+.BR xdp("eth0") .
+Several interfaces may be listed, separated by commas:
+.BR xdp("eth0,eth1") .
+With no argument, the bare form attaches to every interface that is up.
+
+The probe context provides
+.BR $ctx ,
+a pointer to
+.BR struct\ xdp_md
+(access its fields with
+.BR @cast()
+in guru mode), and
+.BR $return ,
+the packet verdict written back to the driver. A script sets the verdict by
+assigning to
+.BR $return :
+.BR XDP_PASS
+passes the packet (the default),
+.BR XDP_DROP
+drops it,
+.BR XDP_TX
+bounces it back out the receiving port, and
+.BR XDP_REDIRECT
+hands it to a redirect map. These helper functions and their numeric
+counterparts (2, 1, 3, 4) are defined in
+.IR tapset/bpf/xdp.stp .
+
+Example uses:
+.PP
+.nf
+# Count incoming packets per ethernet protocol on one NIC
+global count, total
+probe xdp("eth0") {
+  eth = @cast($ctx, "xdp_md", "kernel")->data
+  proto = @cast(eth, "ethhdr", "kernel")->h_proto
+  proto = ((proto & 0xff) << 8) | (proto >> 8 & 0xff)
+  count[proto]++
+  total++
+  $return = XDP_PASS
+}
+
+# Report a few known protocols and quit
+probe timer.ms(5000) {
+  printf("%d total: ipv4 %d arp %d\\n", total, count[2048], count[2054])
+  exit()
+}
+.fi
+.PP
+
 .SS KERNEL MARKERS (OBSOLETE)
 
 This family of probe points hooks up to an older style of static
@@ -1529,11 +1862,45 @@ probe process.data(ADDRESS).write
 probe process.data(ADDRESS).rw
 probe process.data(ADDRESS).length(LEN).write
 probe process.data(ADDRESS).length(LEN).rw
+probe process.data("SYMBOL").write
+probe process.data("SYMBOL").rw
+probe process.data("SYMBOL").length(LEN).write
+probe process.data("SYMBOL").length(LEN).rw
 .ESAMPLE
 
 Currently, only the target process specified by -x PID or -c CMD has
 the watchpoints registered. The ADDRESS must be a valid virtual memory
 address in that process's address space.
+
+Numeric ADDRESS forms work with the default kernel runtime and with
+.BR \-\-runtime=dyninst .
+String
+.B SYMBOL
+forms (a global variable name) require
+.BR \-\-runtime=dyninst ;
+stapdyn resolves the name in the target via Dyninst at startup.  If the
+symbol is missing, a warning is printed and that watchpoint is skipped.
+When
+.B .length
+is omitted for a symbol probe, the variable's size from Dyninst is used
+and then rounded to a hardware breakpoint width (1, 2, 4, or 8 bytes),
+with a warning if the size was not already one of those values.
+.B kernel.data
+probes are not available with
+.BR \-\-runtime=dyninst .
+HW watchpoints also depend on Dyninst/host support (Linux/x86 with debug
+registers today); elsewhere registration fails at startup if none are
+available.
+
+With the kernel runtime, a
+.B process.data
+probe may also fire once during the target's
+.BR execve (2)
+while the new address space is initialized (for example BSS clearing),
+before
+.BR main .
+The dyninst runtime attaches after that phase, so it reports only later
+userspace accesses.
 
 .SS PERF
 
@@ -1578,7 +1945,7 @@ space probe via:
 
 
 .SS PYTHON
-Support for probing python 2 and python 3 function is available with
+Support for probing python 3 functions is available with
 the help of an extra python support module. Note that the debuginfo
 for the version of python being probed is required. To run a python
 script with the extra python support module you'd add the '-m
@@ -1588,9 +1955,6 @@ stap foo.stp -c "python -m HelperSDT foo.py"
 .ESAMPLE
 Python probes look like the following:
 .SAMPLE
-python2.module("MPATTERN").function("PATTERN")
-python2.module("MPATTERN").function("PATTERN").call
-python2.module("MPATTERN").function("PATTERN").return
 python3.module("MPATTERN").function("PATTERN")
 python3.module("MPATTERN").function("PATTERN").call
 python3.module("MPATTERN").function("PATTERN").return
@@ -1671,6 +2035,17 @@ probe instead.
 kernel.trace("sched_*")
 refers to all scheduler-related (really, prefixed) tracepoints in
 the kernel.
+.TP
+kernel.tracepoint("sched_switch")
+refers to the
+.BR sched_switch
+tracepoint using the BTF/vmlinux.h catalog and
+.BR $arg1 ,
+.BR $arg2 ,
+etc. arguments.
+.TP
+module("nfs").tracepoint("nfs_*")
+refers to NFS module tracepoints discovered from module debuginfo.
 .TP
 kernel.mark("getuid")
 refers to an obsolete STAP_MARK(getuid, ...) macro call in the kernel.

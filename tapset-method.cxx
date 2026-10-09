@@ -75,22 +75,21 @@ private:
 public:
   java_builder () {}
 
-  void build (systemtap_session & sess,
+  std::vector<derived_probe*> build (systemtap_session & sess,
 	      probe * base,
 	      probe_point * location,
-	      literal_map_t const & parameters,
-	      vector <derived_probe *> & finished_results);
+	      literal_map_t const & parameters);
 
   virtual string name() { return "java builder"; }
 };
 
-void
+std::vector<derived_probe*>
 java_builder::build (systemtap_session & sess,
 		     probe * base,
 		     probe_point * loc,
-		     literal_map_t const & parameters,
-		     vector <derived_probe *> & finished_results)
+		     literal_map_t const & parameters)
 {
+  vector<derived_probe*> finished_results;
   interned_string method_str_val;
   interned_string method_line_val;
   bool has_method_str = get_param (parameters, TOK_METHOD, method_str_val);
@@ -204,7 +203,10 @@ java_builder::build (systemtap_session & sess,
       probe* new_mark_bt_probe = parse_synthetic_probe (sess, bt_code, tok);
       if (!new_mark_bt_probe)
         throw SEMANTIC_ERROR (_("can't create java backtrace probe"), tok);
-      derive_probes(sess, new_mark_bt_probe, finished_results);
+      {
+        vector<derived_probe*> dps = derive_probes(sess, new_mark_bt_probe);
+        finished_results.insert(finished_results.end(), dps.begin(), dps.end());
+      }
 
 
       // Now to delete the backtrace string
@@ -222,7 +224,10 @@ java_builder::build (systemtap_session & sess,
       probe* new_mark_btd_probe = parse_synthetic_probe (sess, btd_code, tok);
       if (!new_mark_btd_probe)
         throw SEMANTIC_ERROR (_("can't create java backtrace delete probe"), tok);
-      derive_probes(sess, new_mark_btd_probe, finished_results);
+      {
+        vector<derived_probe*> dps = derive_probes(sess, new_mark_btd_probe);
+        finished_results.insert(finished_results.end(), dps.begin(), dps.end());
+      }
     }
 
   // PR21020 - support both java<->stap abis
@@ -276,7 +281,10 @@ java_builder::build (systemtap_session & sess,
   // Splice base->body in after the parsed body
   new_mark_probe->body = new block (new_mark_probe->body, base->body);
 
-  derive_probes (sess, new_mark_probe, finished_results);
+  {
+    vector<derived_probe*> dps = derive_probes (sess, new_mark_probe);
+    finished_results.insert(finished_results.end(), dps.begin(), dps.end());
+  }
 
 
   // the begin portion of the probe to install byteman rules in the target jvm
@@ -313,7 +321,10 @@ java_builder::build (systemtap_session & sess,
   probe* new_begin_probe = parse_synthetic_probe (sess, begin_code, tok);
   if (!new_begin_probe)
     throw SEMANTIC_ERROR (_("can't create java begin probe"), tok);
-  derive_probes (sess, new_begin_probe, finished_results);
+  {
+    vector<derived_probe*> dps = derive_probes (sess, new_begin_probe);
+    finished_results.insert(finished_results.end(), dps.begin(), dps.end());
+  }
 
 
   // the end/error portion of the probe to uninstall byteman rules from the target jvm
@@ -332,7 +343,12 @@ java_builder::build (systemtap_session & sess,
   probe* new_end_probe = parse_synthetic_probe (sess, end_code, tok);
   if (!new_end_probe)
     throw SEMANTIC_ERROR (_("can't create java end probe"), tok);
-  derive_probes (sess, new_end_probe, finished_results);
+  {
+    vector<derived_probe*> dps = derive_probes (sess, new_end_probe);
+    finished_results.insert(finished_results.end(), dps.begin(), dps.end());
+  }
+
+  return finished_results;
 }
 
 void

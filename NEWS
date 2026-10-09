@@ -1,4 +1,143 @@
-* What's new in version 5.5
+* What's new in version 5.7, PRERELEASE
+
+* What's new in version 5.6, 2026-09-17
+
+- New --semantic-keep-going option (pass-2 make -k): continue elaborating
+  after semantic errors, dump a tab-separated SEMANTIC_ERROR catalog on
+  stderr at the end of the failing pass, and still exit non-zero.  Does
+  not change optional probe-point '?' semantics.  Aimed at machine
+  testing (omnibus expected-failure scripts).
+
+- Secure Boot / MOK module signing can generate NIST FIPS-204 ML-DSA
+  keys (ml-dsa-44/65/87) as well as the default RSA-4096.  Set
+  SYSTEMTAP_MOK_KEY_TYPE, or let stap follow the target kernel's
+  CONFIG_MODULE_SIG_KEY_TYPE_MLDSA_* when present (requires
+  CONFIG_CRYPTO_MLDSA and OpenSSL 3.5+).  scripts/sign-file is still
+  used to append the module signature for kernel verification.
+
+- Compile-server / staprun privilege signatures (.ko.sgn) similarly
+  support opt-in ML-DSA via SYSTEMTAP_SIGN_KEY_TYPE (rsa default;
+  ml-dsa-44/65/87).  Requires NSS with CKM_ML_DSA.  Regenerate the
+  server cert (stap-gen-cert) and re-authorize it into the staprun
+  trust database when switching algorithms.  Note: ML-DSA server
+  certificates may not yet work for NSS TLS to the compile server.
+
+- New @enumname() operator, the reverse of @enum(): map an integral
+  value to the corresponding DWARF enumerator name string.  The
+  enumeration type is taken from a typed $variable, or from optional
+  type/module string arguments like @cast.  Unknown values render as
+  decimal.
+
+- process.data hardware watchpoints now work with --runtime=dyninst
+  (via Dyninst ProcControl).  Availability depends on Dyninst/host
+  support (Linux/x86 today); kernel.data remains kernel-runtime only.
+  Dyninst attaches after exec, so it does not see the kernel runtime's
+  execve-time image-init write that can fire process.data once before
+  main.  Also supported: process.data("SYMBOL") under dyninst, with
+  run-time name resolution and optional length taken from the variable
+  size (rounded to a HW breakpoint width).  print_ubacktrace* under
+  dyninst uses a third-party StackwalkerAPI/BPatch walk from stapdyn
+  (symbolized with elfutils) plus tapset/dyninst/ucontext-unwind.stp.
+
+- Added a new option to trace execution of systemtap scripts
+  statement-by-statement. Not yet  available with --bpf backend.
+  Enable it with stap -D STP_EXECTRACE
+
+- New --debug option.  This builds the generated kernel module (.ko)
+  or dyninst module (.so) with maximum debugging information:
+  CONFIG_DEBUG_INFO=y (for .ko), -g, gcc -save-temps=obj (preserving
+  .i/.s temporaries), and runs pahole(1) on the result (if available).
+
+- NEW: LSM (Linux Security Module) hook support for BPF runtime.
+  Attach to kernel security hooks like lsm.bprm_check_security, lsm.file_open,
+  lsm.socket_create, and 35 others. Use $ctx with @cast() to access context.
+  Example: stap -g --runtime=bpf -e 'probe lsm.bprm_check_security {
+    filename = kernel_string(@cast($ctx, "linux_binprm")->filename)
+    if (filename =~ "forbidden") $return = -13 }'  # deny with EACCES
+  Requires kernel 5.7+, CONFIG_BPF_LSM=y. (PR#34126)
+
+- NEW: XDP packet-processing probes for the BPF runtime.  Attach to network
+  interfaces to inspect incoming packets and return a pass/drop/tx verdict:
+  probe xdp("eth0") { $return = XDP_PASS }.  Multiple interfaces may be listed
+  comma-separated; the bare probe xdp attaches to all interfaces that are up.
+  $ctx is a pointer to struct xdp_md; $return defaults to XDP_PASS.
+  Requires kernel 4.8+ and CONFIG_BPF_SYSCALL=y.
+
+- NEW: BTF-based tracepoint probes kernel.tracepoint("name") and
+  module("mod").tracepoint("name").  These discover tracepoints from
+  btf_trace_* callback typedefs in the kernel build tree's vmlinux.h
+  (kernel probes) or in a loadable module's debuginfo (module probes),
+  without trace header files or tracefs.  Handler arguments are
+  positional: $arg1, $arg2, ... (the leading void * cookie is skipped).
+  This is intentionally separate from kernel.trace("system:name"), which
+  still uses trace headers and named TP_PROTO parameters.  BTF tracepoint
+  probes do not use system:name syntax.  Requires vmlinux.h when probing
+  the kernel (CONFIG_DEBUG_INFO_BTF).  Not yet supported with --runtime=bpf.
+
+- syscall.* and tp_syscall.* aliases now use a very high-performance
+  sys_enter / sys_exit dispatcher when BTF vmlinux tracepoints are
+  available.  Existing scripts (syscall.read and friends) pick this up
+  transparently; tp_syscall("name") / tp_syscall("name").return is the
+  explicit form.  kernel.trace("sys_enter") / sys_exit remain the
+  fallback for older kernels.  syscall_any is unchanged.
+
+- REMOVED old systemtap initscript infrastructure. The legacy
+  systemtap-service command and systemtap.service have been replaced with
+  modern systemd service templates:
+  * stap@.service - compiles and runs .stp scripts from /etc/systemtap/script.d/
+  * staprun@.service - runs precompiled .ko modules
+  Both support per-script options via .options files. Compiled modules are
+  cached in /lib/modules/$(uname -r)/systemtap/ and reused across restarts.
+  Use: systemctl start stap@myScript.service
+
+  The old "systemtap-service onboot" functionality has been extracted into
+  a new standalone stap-onboot command for embedding scripts into initramfs.
+
+- Python probing updated: the tapset is split into per-minor-version
+   files (3.9, 3.12, 3.13, 3.14, 3.15) to simplify porting.  Probing works
+   with Python 3.9 through 3.15.
+
+- REMOVED python 2 probing support (python2 tapset and python2.*
+  probes).  Use python3.module(...) probes with python3 -m HelperSDT.
+
+- Runtime handler errors now include a short call-site stack when a
+  fault or tapset error unwinds through nested functions.  Messages
+  show the innermost statement, outer callers ("called from ..."), and
+  the active probe point.  Example:
+    ERROR: user string copy fault -14 at 0x... near identifier
+    'user_string_n' at .../uconversions.stp:128:10 (called from
+    identifier 'user_string' at myscript.stp:21:5) in probe
+    process("libfoo.so").mark("function__entry")
+  Helps trace errors through tapsets and deduplicated functions.
+  (PR#34320)
+
+- @cast() operations now implicitly dereference typedef chains when
+  resolving the named type.  (PR#34199)
+
+- Pass-2 optimizer can combine multiple probe handlers that share the
+  same probe point, reducing registration overhead.  (PR#34161)
+
+- Runtime and tapset porting for Linux 7.2-rc kernels (NFS/VFS/socket/
+  SCSI/signal/futex and related DWARF drift), while keeping older
+  enterprise-kernel fallbacks.  (PR#34318)
+
+- Clang build compatibility tweaks for building SystemTap itself.
+  (PR#34283)
+
+- Pass-2 elaboration now derives DWARF probe points concurrently
+  within each stapfile and shares per-CU/function caches, markedly
+  speeding up scripts with wildcard or syscall.* probe globs.  Thread
+  count is capped by $STAP_NTHREADS.  (PR#34432)
+
+- DWARF DW_OP_entry_value location expressions are now honored, so
+  $parms/$vars pretty-printing and @entry() access work for arguments
+  and locals whose location is only described at function entry.
+
+- Kernel build IDs are now extracted from compressed/non-ELF
+  vmlinuz on aarch64 and s390x, so debuginfod-backed kernel probes
+  resolve correctly there.  (PR#34488)
+
+* What's new in version 5.5, 2026-05-01
 
 - New @enum() operator for accessing enumeration constants from
   DWARF debug information.
@@ -10,6 +149,10 @@
 
 - SSL/TLS connections now use only strong cipher suites, preventing
   downgrade attacks that could force use of weak encryption.
+
+- Removed support for kernel.mark() probes. This facility was based on
+  an old kernel marker prototype that hasn't existed in any kernel in
+  living memory. R.I.P. kernel.mark(), 2007-2026.
 
 * What's new in version 5.4, 2025-10-31
 

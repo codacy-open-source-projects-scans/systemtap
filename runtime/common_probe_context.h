@@ -126,8 +126,11 @@ struct stapregex_match {
    While it's 0, execution continues
    When it's "something", probe code unwinds, _stp_error's, sets error state */
 const char *last_error;
-/* Last statement (token) executed. Often set together with last_error. */
-const char *last_stmt;
+/* Per-frame source locations for runtime error context (PR34320).
+   Index is c->nesting+1: probe handler (nesting==-1) uses [0],
+   nested functions use [1]..[MAXNESTING].  Cleared on successful
+   function return and at probe prologue. */
+const char *last_stmt[MAXNESTING+1];
 
 /* Set when probe handler gets pt_regs handed to it. kregs holds the kernel
    registers when availble. uregs holds the user registers when available.
@@ -152,13 +155,6 @@ union {
        See the kretprobe.stp tapset.  */
     int pi_longs;
   } krp;
-
-  /* State for mark_derived_probes.  */
-  struct {
-    va_list *mark_va_list;
-    const char *marker_name;
-    const char *marker_format;
-  } kmark;
 
   /* State for tracepoint probes. */
   struct {

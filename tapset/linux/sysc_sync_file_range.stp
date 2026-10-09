@@ -26,9 +26,9 @@
 	argstr = sprintf("%d, %d, %d, %s", fd, offset, nbytes, flags_str)
 %)
 
-probe syscall.sync_file_range = dw_syscall.sync_file_range !,
+probe syscall.sync_file_range = tp_syscall.sync_file_range !, dw_syscall.sync_file_range !,
                                 nd_syscall.sync_file_range ? {}
-probe syscall.sync_file_range.return = dw_syscall.sync_file_range.return !,
+probe syscall.sync_file_range.return = tp_syscall.sync_file_range.return !, dw_syscall.sync_file_range.return !,
                                        nd_syscall.sync_file_range.return ? {}
 
 # dw_sync_file_range _____________________________________________________
@@ -142,10 +142,10 @@ probe __nd2_syscall.compat_sync_file_range =
 %)
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.sync_file_range = kernel.trace("sys_enter")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.sync_file_range = tp_syscall("sync_file_range,~compat_sync_file_range") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_compat_gate(@const("__NR_sync_file_range"),
 			       @const("__NR_compat_sync_file_range"))
 	@_SYSCALL_SYNC_FILE_RANGE_NAME
@@ -196,7 +196,7 @@ probe tp_syscall.sync_file_range = kernel.trace("sys_enter")
 probe nd_syscall.sync_file_range.return = nd1_syscall.sync_file_range.return!, nd2_syscall.sync_file_range.return!, tp_syscall.sync_file_range.return
   { }
 
-probe nd1_syscall.sync_file_range.return =
+probe nd1_syscall.sync_file_range.return = 
 	kprobe.function("sys_sync_file_range").return ?
 {
 	@_SYSCALL_SYNC_FILE_RANGE_NAME
@@ -212,12 +212,12 @@ probe nd2_syscall.sync_file_range.return =
 	@SYSC_RETVALSTR(returnval())
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.sync_file_range.return = kernel.trace("sys_exit")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.sync_file_range.return = tp_syscall("sync_file_range,~compat_sync_file_range").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_compat_gate(@const("__NR_sync_file_range"),
 			       @const("__NR_compat_sync_file_range"))
 	@_SYSCALL_SYNC_FILE_RANGE_NAME
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }

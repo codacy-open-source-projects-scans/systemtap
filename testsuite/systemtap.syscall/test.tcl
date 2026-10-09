@@ -8,8 +8,9 @@ proc syscall_cleanup {} {
 	set current_dir ""
     }
     if {$syscall_dir != ""} {
+        chown_to_original_user $syscall_dir
 #	puts "rm -rf $syscall_dir"
-	exec rm -rf $syscall_dir
+	catch {exec rm -rf $syscall_dir}
 	set syscall_dir ""
     }
 }
@@ -20,10 +21,14 @@ proc syscall_cleanup_and_exit {} {
     exit 0
 }
 
-proc bgerror {error} {
-    puts "ERROR: $error"
-    syscall_cleanup
-}
+# PR34119: don't override bgerror from elsewhere; definitely don't
+# proactively run syscall_cleanup() which can remove tmp dirs while
+# they're still being used.
+#proc bgerror {error} {
+#    puts "ERROR: $error"
+#    syscall_cleanup
+#}
+
 trap {syscall_cleanup_and_exit} SIGINT
 
 proc run_one_test {filename flags bits suite} {
@@ -55,7 +60,9 @@ proc run_one_test {filename flags bits suite} {
     # Use -R here, in case a previous staprun hangs up or leaves the
     # syscall.ko module in memory, which would block all subsequent
     # invocations.
-    set cmd "staprun -R ${test_module} -c $syscall_dir/${testname}"
+    # DRAFT: cmd no longer used; see later wrapper + direct exec + procfs
+    #        PID write for the long-running background stap instance.
+    # set cmd "staprun -R ${test_module} -c $syscall_dir/${testname}"
     
     # Extract additional C flags needed to compile
     set add_flags ""
@@ -114,8 +121,63 @@ proc run_one_test {filename flags bits suite} {
 
     set current_dir [pwd]
     cd $syscall_dir
-    
-    catch {eval exec $cmd} output
+
+    # DRAFT speedup: instead of per-test staprun -c (which reloads module),
+    # write this test's PID to the synthetic procfs file (so the already-
+    # running background stap script sees it in target_pid), then exec the
+    # test binary directly.  Use a short-lived bash wrapper so we know the
+    # final PID in advance ($$ before exec).  Caller in syscall.exp truncates
+    # the append-mode log before each test; we simply read its full (small)
+    # contents afterwards.
+    global stap_output_log test_module_name
+    set procfs_target "/proc/systemtap/${test_module_name}/target_pid"
+    # wrapper: echo our pid -> procfs then exec the real test binary
+    set wrap_cmd "bash -c \"echo \\$\\$ > $procfs_target; exec ./$testname\""
+    # run the wrapper (test binary stdout/stderr may be separate; stap
+    # traces go to the bg log)
+    catch {exec truncate -s 0 $stap_output_log}
+    catch {eval exec $wrap_cmd} exe_output
+
+    # DRAFT: poll the log until we see an exit_group line (the final
+    # syscall for the test binary) and the log stops growing.  This
+    # synchronizes on actual completion instead of a fixed sleep.
+    #
+    # The exit_group line alone is not enough: staprun appends entry and
+    # return text in separate writes, so at the moment exit_group shows up
+    # the return values of the last few traced syscalls may still be in
+    # flight.  Keep draining until two successive reads agree (within the
+    # overall budget, which leaves about a second of extra drain headroom
+    # after exit_group shows up), so those trailing "= retval" bits are not
+    # lost from the comparison below.
+    set max_wait_ms 3000
+    set waited 0
+    set prev ""
+    while {1} {
+        set output ""
+        catch {
+            set fh [open $stap_output_log r]
+            set output [read $fh]
+            close $fh
+        }
+        if {[regexp {exit_group} $output] && $output eq $prev} {
+            break
+        }
+        set prev $output
+        after 100
+        incr waited 100
+        if {$waited > $max_wait_ms} {
+            send_log "Timed out waiting for exit_group in $stap_output_log\n"
+            break
+        }
+    }
+
+    # final read of the completed log
+    set output ""
+    catch {
+        set fh [open $stap_output_log r]
+        set output [read $fh]
+        close $fh
+    }
     
     set i 0
     foreach line [split $output "\n"] {
@@ -129,7 +191,7 @@ proc run_one_test {filename flags bits suite} {
 	# puts "PASS $testname"
 	pass "$bits-bit $testname $suite"
     } else {
-	send_log "$testname FAILED. output of \"$cmd\" was:"
+	send_log "$testname FAILED. stap trace output (via $wrap_cmd) was:"
         # add $output at end, just in case it was empty somehow; send_log "" is not happy
 	send_log "\n------------------------------------------\n$output"
 	send_log "\n------------------------------------------\n"

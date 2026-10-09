@@ -38,8 +38,8 @@
 	  set_uint_arg(4, flags)
 %)
 
-probe syscall.sched_getattr = dw_syscall.sched_getattr !, nd_syscall.sched_getattr ? {}
-probe syscall.sched_getattr.return = dw_syscall.sched_getattr.return !,
+probe syscall.sched_getattr = tp_syscall.sched_getattr !, dw_syscall.sched_getattr !, nd_syscall.sched_getattr ? {}
+probe syscall.sched_getattr.return = tp_syscall.sched_getattr.return !, dw_syscall.sched_getattr.return !,
                                      nd_syscall.sched_getattr.return ? {}
 
 # dw_sched_getattr _____________________________________________________
@@ -87,10 +87,10 @@ probe nd2_syscall.sched_getattr = kprobe.function(@arch_syscall_prefix "sys_sche
         %( @_IS_SREG_KERNEL %? @_SYSCALL_SCHED_GETATTR_REGARGS_STORE %)
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.sched_getattr = kernel.trace("sys_enter")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.sched_getattr = tp_syscall("sched_getattr,~compat_sched_getattr") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_compat_gate(@const("__NR_sched_getattr"), @const("__NR_compat_sched_getattr"))
 	@_SYSCALL_SCHED_GETATTR_NAME
 	@_SYSCALL_SCHED_GETATTR_REGARGS
@@ -103,7 +103,7 @@ probe tp_syscall.sched_getattr = kernel.trace("sys_enter")
 probe nd_syscall.sched_getattr.return = nd1_syscall.sched_getattr.return!, nd2_syscall.sched_getattr.return!, tp_syscall.sched_getattr.return
   { }
   
-probe nd1_syscall.sched_getattr.return =
+probe nd1_syscall.sched_getattr.return = 
 	kprobe.function("sys_sched_getattr").return ?
 {
 	@_SYSCALL_SCHED_GETATTR_NAME
@@ -117,11 +117,11 @@ probe nd2_syscall.sched_getattr.return = kprobe.function(@arch_syscall_prefix "s
 	@SYSC_RETVALSTR(returnval())
 }
  
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.sched_getattr.return = kernel.trace("sys_exit")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.sched_getattr.return = tp_syscall("sched_getattr,~compat_sched_getattr").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_compat_gate(@const("__NR_sched_getattr"), @const("__NR_compat_sched_getattr"))
 	@_SYSCALL_SCHED_GETATTR_NAME
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }

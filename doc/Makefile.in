@@ -236,21 +236,15 @@ PKG_CONFIG = @PKG_CONFIG@
 PKG_CONFIG_LIBDIR = @PKG_CONFIG_LIBDIR@
 PKG_CONFIG_PATH = @PKG_CONFIG_PATH@
 POSUB = @POSUB@
-PYTHON = @PYTHON@
 PYTHON3 = @PYTHON3@
 PYTHON3_CONFIG = @PYTHON3_CONFIG@
 PYTHON3_CPPFLAGS = @PYTHON3_CPPFLAGS@
 PYTHON3_EXEC_PREFIX = @PYTHON3_EXEC_PREFIX@
+PYTHON3_LIBPYTHON = @PYTHON3_LIBPYTHON@
+PYTHON3_MINOR = @PYTHON3_MINOR@
 PYTHON3_PLATFORM = @PYTHON3_PLATFORM@
 PYTHON3_PREFIX = @PYTHON3_PREFIX@
 PYTHON3_VERSION = @PYTHON3_VERSION@
-PYTHON_CONFIG = @PYTHON_CONFIG@
-PYTHON_CPPFLAGS = @PYTHON_CPPFLAGS@
-PYTHON_EXEC_PREFIX = @PYTHON_EXEC_PREFIX@
-PYTHON_PLATFORM = @PYTHON_PLATFORM@
-PYTHON_PREFIX = @PYTHON_PREFIX@
-PYTHON_UNKNOWN = @PYTHON_UNKNOWN@
-PYTHON_VERSION = @PYTHON_VERSION@
 RANLIB = @RANLIB@
 READLINE_LIBS = @READLINE_LIBS@
 SED = @SED@
@@ -261,6 +255,7 @@ STAP_PREFIX = @STAP_PREFIX@
 STRIP = @STRIP@
 USE_NLS = @USE_NLS@
 VERSION = @VERSION@
+WNO_TEMPLATE_BODY = @WNO_TEMPLATE_BODY@
 XGETTEXT = @XGETTEXT@
 XGETTEXT_015 = @XGETTEXT_015@
 XGETTEXT_EXTRA_OPTIONS = @XGETTEXT_EXTRA_OPTIONS@
@@ -315,6 +310,8 @@ infodir = @infodir@
 install_sh = @install_sh@
 jsonc_CFLAGS = @jsonc_CFLAGS@
 jsonc_LIBS = @jsonc_LIBS@
+libbpf_CFLAGS = @libbpf_CFLAGS@
+libbpf_LIBS = @libbpf_LIBS@
 libdir = @libdir@
 libexecdir = @libexecdir@
 libvirt_CFLAGS = @libvirt_CFLAGS@
@@ -333,16 +330,12 @@ oldincludedir = @oldincludedir@
 openssl_CFLAGS = @openssl_CFLAGS@
 openssl_LIBS = @openssl_LIBS@
 pdfdir = @pdfdir@
-pkgpyexecdir = @pkgpyexecdir@
-pkgpythondir = @pkgpythondir@
 preferred_python = @preferred_python@
 prefix = @prefix@
 program_transform_name = @program_transform_name@
 psdir = @psdir@
 py3execdir = @py3execdir@
-pyexecdir = @pyexecdir@
 python3dir = @python3dir@
-pythondir = @pythondir@
 runstatedir = @runstatedir@
 sbindir = @sbindir@
 selinux_CFLAGS = @selinux_CFLAGS@
@@ -652,12 +645,12 @@ uninstall-am: uninstall-local
 
 .tex.dvi:
 	pwd=`pwd`; cd $(srcdir); \
-	latex -output-directory=$$pwd $<; \
+	TZ=UTC latex -output-directory=$$pwd $<; \
 	touch $*.glo; \
 	makeindex $*.glo -s nomencl.ist -o $*.gls; \
-	latex -output-directory=$$pwd $<; \
-	latex -output-directory=$$pwd $<; \
-	latex -output-directory=$$pwd $<
+	TZ=UTC latex -output-directory=$$pwd $<; \
+	TZ=UTC latex -output-directory=$$pwd $<; \
+	TZ=UTC latex -output-directory=$$pwd $<
 
 # Tell versions [3.59,3.63) of GNU make to not export all variables.
 # Otherwise a system limit (for SysV at least) may be exceeded.

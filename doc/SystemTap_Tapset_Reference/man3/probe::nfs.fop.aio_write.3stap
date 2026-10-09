@@ -2,12 +2,12 @@
 .\"     Title: probe::nfs.fop.aio_write
 .\"    Author: 
 .\" Generator: DocBook XSL Stylesheets vsnapshot <http://docbook.sf.net/>
-.\"      Date: October 2025
+.\"      Date: September 2026
 .\"    Manual: Network File Storage Tapsets
-.\"    Source: SystemTap Tapset Reference
+.\"    Source: SystemTap Tapset Reference Version 5.6
 .\"  Language: English
 .\"
-.TH "PROBE::NFS\&.FOP\&.A" "3stap" "October 2025" "SystemTap Tapset Reference" "Network File Storage Tapsets"
+.TH "PROBE::NFS\&.FOP\&.A" "3stap" "September 2026" "SystemTap Tapset Reference Ver" "Network File Storage Tapsets"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -32,7 +32,7 @@ probe::nfs.fop.aio_write \- NFS client aio_write file operation
 .SH "SYNOPSIS"
 .sp
 .nf
-nfs\&.fop\&.aio_write 
+probe nfs\&.fop\&.aio_write {}
 .fi
 .SH "VALUES"
 .PP
@@ -41,14 +41,14 @@ nfs\&.fop\&.aio_write
 device identifier
 .RE
 .PP
+\fIino\fR
+.RS 4
+inode number
+.RE
+.PP
 \fIbuf\fR
 .RS 4
 the address of buf in user space
-.RE
-.PP
-\fIcount\fR
-.RS 4
-read bytes
 .RE
 .PP
 \fIparent_name\fR
@@ -56,19 +56,19 @@ read bytes
 parent dir name
 .RE
 .PP
+\fIfile_name\fR
+.RS 4
+file name
+.RE
+.PP
 \fIpos\fR
 .RS 4
 offset of the file
 .RE
 .PP
-\fIino\fR
+\fIcount\fR
 .RS 4
-inode number
-.RE
-.PP
-\fIfile_name\fR
-.RS 4
-file name
+read bytes
 .RE
 .SH SEE ALSO\n 
 .IR tapset::nfs (3stap)

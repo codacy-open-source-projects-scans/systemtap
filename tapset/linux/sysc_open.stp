@@ -37,36 +37,80 @@
 	  set_uint_arg(3, mode)
 %)
 
-probe syscall.open = dw_syscall.open !, nd_syscall.open ? {}
-probe syscall.open.return = dw_syscall.open.return !, nd_syscall.open.return ? {}
+probe syscall.open = tp_syscall.open !, dw_syscall.open !, nd_syscall.open ? {}
+probe syscall.open.return = tp_syscall.open.return !, dw_syscall.open.return !, nd_syscall.open.return ? {}
 
 # dw_open _____________________________________________________
+#
+# SYSCALL_DEFINE hid bare sys_open.  Entry via arch pt_regs wrappers
+# ($regs) keeps full syscall mode; __do_sys_open often lacks $mode in
+# DWARF (optimized) and must not be used for argstr.  For .return, globs
+# skip inlined __do_/__se_ hits (no WARNING) — see sysc_signalfd.stp.
 
 probe dw_syscall.open = __syscall.compat_open ?, __syscall.open
 {
 	@__syscall_compat_gate(@const("__NR_open"), @const("__NR_compat_open"))
 	@_SYSCALL_OPEN_NAME
-	flags = __int32($flags)
+}
+probe __syscall.compat_open = kernel.function("compat_sys_open").call ?,
+			      kernel.function("sys32_open").call ?,
+			      kernel.function("__*_compat_sys_open") ?
+{
+	# Legacy compat_sys_* / sys32_* have dwarf locals; arch wrappers
+	# expose $regs.  Skip inlined __do_/__se_ (no or truncated $mode).
+	# Pre-init locals so -W never-assigned is quiet across next paths.
+	filename = ""
+	flags = 0
+	mode = 0
+	if (probefunc() =~ "__do_|__se_|__pfx") next
+	if (@defined($regs)) {
+		__set_syscall_pt_regs($regs)
+		filename = user_string_quoted(pointer_arg(1))
+		flags = int_arg(2)
+		mode = uint_arg(3)
+	} else if (@defined($filename) && @defined($mode)) {
+		// On some platforms, $filename and $mode are longs on the
+		// kernel side. Truncate these down to 32 bits.
+		filename = user_string_quoted(__uint32($filename))
+		flags = __int32($flags)
+		mode = __uint32($mode)
+	} else {
+		next
+	}
 	flags_str = _sys_open_flag_str(flags)
 	@_SYSCALL_OPEN_ARGSTR
 }
-probe __syscall.compat_open = kernel.function("compat_sys_open").call ?,
-			      kernel.function("sys32_open").call ?
+probe __syscall.open = kernel.function("sys_open").call !,
+		       kernel.function("__*_sys_open") ?
 {
-	// On some platforms, $filename and $mode are longs on the
-	// kernel side. Truncate these down to 32 bits.
-	filename = user_string_quoted(__uint32($filename))
-	mode = __uint32($mode)
+	# Arch wrappers (__x64_sys_open, …) carry $regs with full mode.
+	# Skip openat (fnmatch), compat (handled above), and __do_/__se_.
+	filename = ""
+	flags = 0
+	mode = 0
+	if (probefunc() =~ "openat|compat|__do_|__se_|__pfx") next
+	if (@defined($regs)) {
+		__set_syscall_pt_regs($regs)
+		filename = user_string_quoted(pointer_arg(1))
+		flags = int_arg(2)
+		mode = uint_arg(3)
+	} else if (@defined($filename) && @defined($mode)) {
+		filename = user_string_quoted($filename)
+		flags = __int32($flags)
+		mode = __uint32($mode)
+	} else {
+		next
+	}
+	flags_str = _sys_open_flag_str(flags)
+	@_SYSCALL_OPEN_ARGSTR
 }
-probe __syscall.open = kernel.function("sys_open").call
+# Globs cover arch wrappers; inlined __do_/__se_ .return are skipped
+# silently (unlike an explicit __do_sys_open.return, which WARNINGs).
+probe dw_syscall.open.return = kernel.function("sys_open").return !,
+			       kernel.function("*sys_open").return ?,
+			       kernel.function("sys32_open").return ?
 {
-	filename = user_string_quoted($filename)
-	mode = __uint32($mode)
-}
-probe dw_syscall.open.return = kernel.function("compat_sys_open").return ?,
-                            kernel.function("sys32_open").return ?,
-                            kernel.function("sys_open").return ?
-{
+	if (probefunc() =~ "openat") next
 	@__syscall_compat_gate(@const("__NR_open"), @const("__NR_compat_open"))
 	@_SYSCALL_OPEN_NAME
 	@SYSC_RETVALSTR($return)
@@ -100,10 +144,10 @@ probe nd2_syscall.open = kprobe.function(@arch_syscall_prefix "compat_sys_open")
         %( @_IS_SREG_KERNEL %? @_SYSCALL_OPEN_REGARGS_STORE %)
 }
 
-/* kernel 3.5+, but undesirable because of it affects all syscalls */
-probe tp_syscall.open = kernel.trace("sys_enter")
+/* BTF sys_enter dispatcher (tp_syscall("open")), else kernel.trace fallback. */
+probe tp_syscall.open = tp_syscall("open,~compat_open") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_compat_gate(@const("__NR_open"), @const("__NR_compat_open"))
 	@_SYSCALL_OPEN_NAME
 	@_SYSCALL_OPEN_REGARGS
@@ -133,11 +177,11 @@ probe nd2_syscall.open.return = kprobe.function(@arch_syscall_prefix "compat_sys
 	@SYSC_RETVALSTR(returnval())
 }
 
-/* kernel 3.5+, but undesirable because of it affects all syscalls */
-probe tp_syscall.open.return = kernel.trace("sys_exit")
+/* BTF sys_exit dispatcher (tp_syscall("open").return), else kernel.trace fallback. */
+probe tp_syscall.open.return = tp_syscall("open,~compat_open").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_compat_gate(@const("__NR_open"), @const("__NR_compat_open"))
 	@_SYSCALL_OPEN_NAME
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }

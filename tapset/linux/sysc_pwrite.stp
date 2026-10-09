@@ -36,8 +36,8 @@
 	  set_ulong_arg(3, count)
 %)
 
-probe syscall.pwrite = dw_syscall.pwrite !, nd_syscall.pwrite ? {}
-probe syscall.pwrite.return = dw_syscall.pwrite.return !,
+probe syscall.pwrite = tp_syscall.pwrite !, dw_syscall.pwrite !, nd_syscall.pwrite ? {}
+probe syscall.pwrite.return = tp_syscall.pwrite.return !, dw_syscall.pwrite.return !,
                               nd_syscall.pwrite.return ? {}
 
 # dw_pwrite _____________________________________________________
@@ -99,10 +99,10 @@ probe nd2_syscall.pwrite = kprobe.function(@arch_syscall_prefix "sys_pwrite64") 
 %)
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.pwrite = kernel.trace("sys_enter")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.pwrite = tp_syscall("pwrite64") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_gate(@const("__NR_pwrite64"))
 	@_SYSCALL_PWRITE_NAME
 	@_SYSCALL_PWRITE_REGARGS
@@ -137,13 +137,13 @@ probe nd2_syscall.pwrite.return = kprobe.function(@arch_syscall_prefix "sys_pwri
 	@SYSC_RETVALSTR(returnval())
 }
  
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.pwrite.return = kernel.trace("sys_exit")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.pwrite.return = tp_syscall("pwrite64").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_gate(@const("__NR_pwrite64"))
 	@_SYSCALL_PWRITE_NAME
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }
 
 # long sys32_pwrite64(unsigned int fd, const char __user *ubuf,
@@ -152,8 +152,8 @@ probe tp_syscall.pwrite.return = kernel.trace("sys_exit")
 #		         const char __user *, ubuf,
 #		         compat_size_t, count, u32, high, u32, low)
 
-probe syscall.pwrite32 = dw_syscall.pwrite32 !, nd_syscall.pwrite32 ? {}
-probe syscall.pwrite32.return = dw_syscall.pwrite32.return !,
+probe syscall.pwrite32 = tp_syscall.pwrite32 !, dw_syscall.pwrite32 !, nd_syscall.pwrite32 ? {}
+probe syscall.pwrite32.return = tp_syscall.pwrite32.return !, dw_syscall.pwrite32.return !,
                                 nd_syscall.pwrite32.return ? {}
 
 # dw_pwrite32 _____________________________________________________
@@ -194,7 +194,7 @@ probe dw_syscall.pwrite32.return =
 probe nd_syscall.pwrite32 = nd1_syscall.pwrite32!, nd2_syscall.pwrite32!, tp_syscall.pwrite32
   { }
 
-probe nd1_syscall.pwrite32 =
+probe nd1_syscall.pwrite32 = 
 %( arch == "s390" %?
 	kprobe.function("compat_sys_s390_pwrite64") ?,
 %)
@@ -230,10 +230,10 @@ probe nd2_syscall.pwrite32 = kprobe.function(@arch_syscall_prefix "compat_sys_x8
 %)
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.pwrite32 = kernel.trace("sys_enter")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.pwrite32 = tp_syscall("~compat_pwrite64") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__compat_syscall_gate(@const("__NR_compat_pwrite64"))
 	@_SYSCALL_PWRITE_NAME
 	@_SYSCALL_PWRITE_REGARGS
@@ -254,7 +254,7 @@ probe tp_syscall.pwrite32 = kernel.trace("sys_enter")
 probe nd_syscall.pwrite32.return = nd1_syscall.pwrite32.return!, nd2_syscall.pwrite32.return!, tp_syscall.pwrite32.return
   { }
   
-probe nd1_syscall.pwrite32.return =
+probe nd1_syscall.pwrite32.return = 
 %( arch == "s390" %?
 	kprobe.function("compat_sys_s390_pwrite64").return ?,
 %)
@@ -275,11 +275,11 @@ probe nd2_syscall.pwrite32.return =
 	@SYSC_RETVALSTR(returnval())
 }
  
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.pwrite32.return = kernel.trace("sys_exit")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.pwrite32.return = tp_syscall("~compat_pwrite64").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__compat_syscall_gate(@const("__NR_compat_pwrite64"))
 	@_SYSCALL_PWRITE_NAME
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }

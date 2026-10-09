@@ -66,5 +66,7 @@ struct option stap_long_options[] = {
   { "example",                     no_argument,       NULL, LONG_OPT_RUN_EXAMPLE},
   { "no-global-var-display",       no_argument,       NULL, LONG_OPT_NO_GLOBAL_VAR_DISPLAY},
   { "language-server",             no_argument,       NULL, LONG_OPT_LANGUAGE_SERVER},
+  { "debug",                       no_argument,       NULL, LONG_OPT_DEBUG },
+  { "semantic-keep-going",         no_argument,       NULL, LONG_OPT_SEMANTIC_KEEP_GOING },
   { NULL, 0, NULL, 0 }
 };

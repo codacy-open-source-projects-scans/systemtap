@@ -110,7 +110,7 @@ am__configure_deps = $(am__aclocal_m4_deps) $(CONFIGURE_DEPENDENCIES) \
 DIST_COMMON = $(srcdir)/Makefile.am
 mkinstalldirs = $(install_sh) -d
 CONFIG_HEADER = $(top_builddir)/config.h
-CONFIG_CLEAN_FILES = stap.1 stappaths.7 systemtap-service.8
+CONFIG_CLEAN_FILES = stap.1 stappaths.7 stap-onboot.8
 CONFIG_CLEAN_VPATH_FILES =
 AM_V_P = $(am__v_P_@AM_V@)
 am__v_P_ = $(am__v_P_@AM_DEFAULT_V@)
@@ -274,21 +274,15 @@ PKG_CONFIG = @PKG_CONFIG@
 PKG_CONFIG_LIBDIR = @PKG_CONFIG_LIBDIR@
 PKG_CONFIG_PATH = @PKG_CONFIG_PATH@
 POSUB = @POSUB@
-PYTHON = @PYTHON@
 PYTHON3 = @PYTHON3@
 PYTHON3_CONFIG = @PYTHON3_CONFIG@
 PYTHON3_CPPFLAGS = @PYTHON3_CPPFLAGS@
 PYTHON3_EXEC_PREFIX = @PYTHON3_EXEC_PREFIX@
+PYTHON3_LIBPYTHON = @PYTHON3_LIBPYTHON@
+PYTHON3_MINOR = @PYTHON3_MINOR@
 PYTHON3_PLATFORM = @PYTHON3_PLATFORM@
 PYTHON3_PREFIX = @PYTHON3_PREFIX@
 PYTHON3_VERSION = @PYTHON3_VERSION@
-PYTHON_CONFIG = @PYTHON_CONFIG@
-PYTHON_CPPFLAGS = @PYTHON_CPPFLAGS@
-PYTHON_EXEC_PREFIX = @PYTHON_EXEC_PREFIX@
-PYTHON_PLATFORM = @PYTHON_PLATFORM@
-PYTHON_PREFIX = @PYTHON_PREFIX@
-PYTHON_UNKNOWN = @PYTHON_UNKNOWN@
-PYTHON_VERSION = @PYTHON_VERSION@
 RANLIB = @RANLIB@
 READLINE_LIBS = @READLINE_LIBS@
 SED = @SED@
@@ -299,6 +293,7 @@ STAP_PREFIX = @STAP_PREFIX@
 STRIP = @STRIP@
 USE_NLS = @USE_NLS@
 VERSION = @VERSION@
+WNO_TEMPLATE_BODY = @WNO_TEMPLATE_BODY@
 XGETTEXT = @XGETTEXT@
 XGETTEXT_015 = @XGETTEXT_015@
 XGETTEXT_EXTRA_OPTIONS = @XGETTEXT_EXTRA_OPTIONS@
@@ -353,6 +348,8 @@ infodir = @infodir@
 install_sh = @install_sh@
 jsonc_CFLAGS = @jsonc_CFLAGS@
 jsonc_LIBS = @jsonc_LIBS@
+libbpf_CFLAGS = @libbpf_CFLAGS@
+libbpf_LIBS = @libbpf_LIBS@
 libdir = @libdir@
 libexecdir = @libexecdir@
 libvirt_CFLAGS = @libvirt_CFLAGS@
@@ -371,16 +368,12 @@ oldincludedir = @oldincludedir@
 openssl_CFLAGS = @openssl_CFLAGS@
 openssl_LIBS = @openssl_LIBS@
 pdfdir = @pdfdir@
-pkgpyexecdir = @pkgpyexecdir@
-pkgpythondir = @pkgpythondir@
 preferred_python = @preferred_python@
 prefix = @prefix@
 program_transform_name = @program_transform_name@
 psdir = @psdir@
 py3execdir = @py3execdir@
-pyexecdir = @pyexecdir@
 python3dir = @python3dir@
-pythondir = @pythondir@
 runstatedir = @runstatedir@
 sbindir = @sbindir@
 selinux_CFLAGS = @selinux_CFLAGS@
@@ -409,7 +402,7 @@ SUBDIRS = cs
 AUTOMAKE_OPTIONS = no-dist foreign subdir-objects
 man_MANS = stapprobes.3stap stapfuncs.3stap stapvars.3stap \
 	stapex.3stap dtrace.1 stap-merge.1 stappaths.7 stapsh.8 \
-	systemtap-service.8 stapref.1 $(am__append_1) $(am__append_2) \
+	stap-onboot.8 stapref.1 $(am__append_1) $(am__append_2) \
 	$(am__append_3) $(am__append_4)
 all: all-recursive
 
@@ -447,7 +440,7 @@ stap.1: $(top_builddir)/config.status $(srcdir)/stap.1.in
 	cd $(top_builddir) && $(SHELL) ./config.status $(subdir)/$@
 stappaths.7: $(top_builddir)/config.status $(srcdir)/stappaths.7.in
 	cd $(top_builddir) && $(SHELL) ./config.status $(subdir)/$@
-systemtap-service.8: $(top_builddir)/config.status $(srcdir)/systemtap-service.8.in
+stap-onboot.8: $(top_builddir)/config.status $(srcdir)/stap-onboot.8.in
 	cd $(top_builddir) && $(SHELL) ./config.status $(subdir)/$@
 install-man1: $(man_MANS)
 	@$(NORMAL_INSTALL)

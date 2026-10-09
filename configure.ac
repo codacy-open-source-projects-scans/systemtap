@@ -1,7 +1,7 @@
 dnl configure.ac --- autoconf input file for systemtap
 dnl Process this file with autoconf to produce a configure script.
 
-AC_INIT([systemtap],[5.5],[systemtap@sourceware.org],[systemtap])
+AC_INIT([systemtap],[5.7],[systemtap@sourceware.org],[systemtap])
 dnl                  ^^^ see also NEWS, systemtap.spec, testsuite/configure.ac
 dnl                      doc/SystemTap_Beginners_Guide/en-US/Book_Info.xml
 
@@ -38,59 +38,17 @@ AC_CHECK_FUNCS(openat)
 AM_GNU_GETTEXT(external)
 AM_GNU_GETTEXT_VERSION([0.19.4])
 
-# We want the 'PYTHON' varible to be python version 2. We also want
-# our custom 'PYTHON3' varible to be python version 3.
-#
-# Note that the python2/python3 code was inspired by code in the
-# 'abrt' configure:
-#   <https://github.com/abrt/abrt/blob/master/configure.ac>
-#
-# First, figure out what version of python is in the executable named
-# 'python'. On most systems that is python version 2, but on arch
-# linux that is python version 3.
-AC_PATH_PROG([PYTHON_UNKNOWN], [python], [no])
-if test "x$PYTHON_UNKNOWN" != "xno"; then
-   # OK, we found 'python'. What version is it?
-   AC_CACHE_CHECK([whether $PYTHON_UNKNOWN is version 2 or 3],
-		 [ac_cv_python_unknown_version],
-		 [ac_cv_python_unknown_version=`$PYTHON_UNKNOWN -c "import sys; sys.stdout.write(sys.version[[:3]][[0]])"`])
-fi
-  
-# Now we'll update the _AM_PYTHON_INTERPRETER_LIST variable (which
-# AM_PATH_PYTHON uses) to only be version 2 versions of python. Note
-# that the m4_define happens when autoconf is run, but the
-# PLAIN_PYTHON_INTERPRETER variable expansion will happen when the
-# user runs configure.
-#
-# Note that for python2, we prefer an executable named 'python2' over
-# one just named 'python'.
-if test "x$PYTHON_UNKNOWN" != "xno" -a "x$ac_cv_python_unknown_version" = "x2"; then
-   PLAIN_PYTHON_INTERPRETER=python
+# Now let's try to find python version 3. We prioritize newer versions
+# (like 3.12+ which are available on RHEL8/9) to ensure we have
+# modern enough pip support for our PEP 517 build system.
+# Override with ./configure PYTHON3=python3.13 to build against a specific minor.
+AC_ARG_VAR([PYTHON3], [Python 3 interpreter for probe/tapset support])
+if test -n "$PYTHON3"; then
+  AC_PATH_PROG([PYTHON3], [$PYTHON3], [:])
 else
-   PLAIN_PYTHON_INTERPRETER=python2
+  AC_PATH_PROGS([PYTHON3],
+              	 [python3.15 python3.14 python3.13 python3.12 python3.11 python3.10 python3.9 python3.8 python3.7 python3 python3.6 python3.5 python3.4 python3.3 python3.2 python3.1 python3.0], [:])
 fi
-m4_define([_AM_PYTHON_INTERPRETER_LIST],
-	  [python2 $PLAIN_PYTHON_INTERPRETER python2.7 python2.6])
-
-# Now we can call AM_PATH_PYTHON to find python version 2.6+ (and
-# version 2 only).
-AM_PATH_PYTHON([2.6], [], [:])
-python_basename=$(basename "$PYTHON")
-AC_DEFINE_UNQUOTED([PYTHON_BASENAME], "${python_basename}",
-		   [Base name of the python2 interpreter binary.])
-if test "x$PYTHON" != "x:"; then
-AC_DEFINE([PYTHON_EXISTS], [],
-	  [The python2 interpreter binary exists.])
-fi
-
-# AM_PATH_PYTHON defines 'pyexecdir'. Make sure the python and
-# pyexecdir variables get sent down to the subconfigure in the
-# testsuite directory.
-AS_VAR_APPEND([ac_configure_args], [" python='$PYTHON' pyexecdir='$pyexecdir'"])
-
-# Now let's try to find python version 3.
-AC_PATH_PROGS([PYTHON3],
-              	 [python3 python3.7 python3.6 python3.5 python3.4 python3.3 python3.2 python3.1 python3.0], [:])
 python3_basename=$(basename "$PYTHON3")
 AC_DEFINE_UNQUOTED([PYTHON3_BASENAME], "${python3_basename}",
 		   [Base name of the python3 interpreter binary.])
@@ -103,6 +61,10 @@ if test "x$PYTHON3" != "x:"; then
    AC_CACHE_CHECK([for python3 version], [ac_cv_python3_version],
    		  [ac_cv_python3_version=`$PYTHON3 -c "import sys; sys.stdout.write(sys.version[[:3]])"`])
    AC_SUBST([PYTHON3_VERSION], [$ac_cv_python3_version])
+   python3_minor=`$PYTHON3 -c "import sys; sys.stdout.write(str(sys.version_info[[1]]))"`
+   AC_SUBST([PYTHON3_MINOR], [$python3_minor])
+   python3_libpython=`$PYTHON3 -c "import sysconfig, os; print(os.path.join(sysconfig.get_config_var('LIBDIR'), sysconfig.get_config_var('INSTSONAME')))"`
+   AC_SUBST([PYTHON3_LIBPYTHON], [$python3_libpython])
    AC_SUBST([PYTHON3_PREFIX], ['${prefix}'])
    AC_SUBST([PYTHON3_EXEC_PREFIX], ['${exec_prefix}'])
    AC_CACHE_CHECK([for python3 platform], [ac_cv_python3_platform],
@@ -110,18 +72,46 @@ if test "x$PYTHON3" != "x:"; then
    AC_SUBST([PYTHON3_PLATFORM], [$ac_cv_python3_platform])
 
    AC_CACHE_CHECK([for python3 script directory], [ac_cv_python3_dir],
-		  [ac_cv_python3_dir=`$PYTHON3 -c "import distutils.sysconfig; print(distutils.sysconfig.get_python_lib(0,0,prefix='$PYTHON3_PREFIX'))"`])
+		  [ac_cv_python3_dir=`$PYTHON3 -c "
+try:
+    import distutils.sysconfig as ds
+    print(ds.get_python_lib(0, 0, prefix='$PYTHON3_PREFIX'))
+except ImportError:
+    import sysconfig
+    print(sysconfig.get_path('purelib', vars={'base': '\${prefix}', 'platbase': '\${prefix}', 'installed_base': '\${prefix}', 'installed_platbase': '\${prefix}'}))
+"`])
    AC_SUBST([python3dir], [$ac_cv_python3_dir])
 
    AC_CACHE_CHECK([for python3 extension module directory],
    		  [ac_cv_py3execdir],
-		  [ac_cv_py3execdir=`$PYTHON3 -c "import distutils.sysconfig; print(distutils.sysconfig.get_python_lib(1,0,prefix='$PYTHON3_EXEC_PREFIX'))"`])
+		  [ac_cv_py3execdir=`$PYTHON3 -c "
+try:
+    import distutils.sysconfig as ds
+    print(ds.get_python_lib(1, 0, prefix='$PYTHON3_EXEC_PREFIX'))
+except ImportError:
+    import sysconfig
+    print(sysconfig.get_path('platlib', vars={'base': '\${prefix}', 'platbase': '\${prefix}', 'installed_base': '\${prefix}', 'installed_platbase': '\${prefix}'}))
+"`])
    AC_SUBST([py3execdir], [$ac_cv_py3execdir])
 fi
 
 # Make sure the python3 and py3execdir variables get sent down to
 # the subconfigure in the testsuite directory.
 AS_VAR_APPEND([ac_configure_args], [" python3='$PYTHON3' py3execdir='$ac_cv_py3execdir'"])
+
+dnl Enable extra C++ debug checks (_GLIBCXX_DEBUG)
+AC_MSG_CHECKING([whether to build with C++ debug checks])
+AC_ARG_ENABLE([glibcxx-debug],
+        AS_HELP_STRING('[--enable-glibcxx-debug], [compile with -D_GLIBCXX_DEBUG -D_GLIBCXX_DEBUG_PEDANTIC (implies --without-dyninst)]))
+AS_IF([test "${enable_glibcxx_debug}" = "yes"], [AC_MSG_RESULT([yes])], [AC_MSG_RESULT([no])])
+AM_CONDITIONAL([enable_glibcxx_debug], [test "${enable_glibcxx_debug}" = "yes"])
+dnl _GLIBCXX_DEBUG changes the ABI of std:: containers; Dyninst is a
+dnl pre-compiled shared library whose API passes std::set by reference,
+dnl so linking against it with debug-mode containers fails.
+AS_IF([test "${enable_glibcxx_debug}" = "yes" -a "${with_dyninst}" != "no"], [
+  AC_MSG_NOTICE([--enable-glibcxx-debug forces --without-dyninst (ABI incompatibility with pre-compiled Dyninst libraries)])
+  with_dyninst=no
+])
 
 dnl Allow the build to exclude -Werror
 AC_MSG_CHECKING([whether to build with -Werror])
@@ -201,6 +191,17 @@ AX_CHECK_COMPILE_FLAG([-faligned-new], ALIGNEDNEW="-faligned-new", ALIGNEDNEW=""
 AC_LANG_POP(C++)
 
 AC_SUBST(ALIGNEDNEW)
+
+dnl Dyninst headers can trigger GCC's -Wtemplate-body; suppress if the
+dnl compiler knows that option.  Clang does not (unknown-warning-option
+dnl under -Werror), so probe with -Werror like the other flag checks.
+AC_LANG_PUSH(C++)
+AX_CHECK_COMPILE_FLAG([-Wno-template-body],
+  [WNO_TEMPLATE_BODY="-Wno-template-body"],
+  [WNO_TEMPLATE_BODY=""],
+  [-Werror])
+AC_LANG_POP(C++)
+AC_SUBST(WNO_TEMPLATE_BODY)
 
 dnl Carry forward some empty PIE*FLAGS so we don't have to modify
 dnl all the Makefile.am's just now.
@@ -597,6 +598,29 @@ if test $enable_translator = yes; then
       [-Wl,--start-group -ldw $ebl_LIBS -Wl,--end-group -lelf])
     stap_LIBS="$stap_LIBS -Wl,--start-group -ldw $ebl_LIBS -Wl,--end-group -lelf"
     LIBS="$save_LIBS"
+
+    # Elfutils built with --enable-thread-safety defines _ELFUTILS_THREAD_SAFE
+    # in <elfutils/version.h>.  Used to allow concurrent read-only DWARF
+    # walks after Dwfl reporting (pass-2 dwarf builds; pass-3 unwind dump).
+    AC_CHECK_DECL([_ELFUTILS_THREAD_SAFE],
+      [have_elfutils_thread_safety=yes
+       AC_DEFINE([HAVE_ELFUTILS_THREAD_SAFETY], [1],
+         [Define to 1 if elfutils was built with --enable-thread-safety.])],
+      [have_elfutils_thread_safety=no],
+      [#include <elfutils/version.h>])
+    AC_MSG_CHECKING([for elfutils thread-safety support])
+    AC_MSG_RESULT([$have_elfutils_thread_safety])
+
+    # zlib: used to unwrap aarch64 EFI-zboot / s390x zipl vmlinuz images
+    # when hunting for the kernel NT_GNU_BUILD_ID (elfutils can't).
+    save_LIBS="$LIBS"
+    AC_CHECK_LIB(z, inflate, [
+      stap_LIBS="$stap_LIBS -lz"
+      AC_DEFINE([HAVE_LIBZ], [1], [Define to 1 if you have zlib.])
+    ], [
+      AC_MSG_WARN([zlib not found; kernel vmlinuz build-id extraction disabled])
+    ])
+    LIBS="$save_LIBS"
 fi
 
 AC_SUBST(stap_LIBS)
@@ -659,10 +683,12 @@ no) ;;
      old_LIBS="$LIBS"
      old_LDFLAGS="$LDFLAGS"
      old_CPPFLAGS="$CPPFLAGS"
-     CPPFLAGS="$CPPFLAGS $DYNINST_CXXFLAGS"
      AC_LANG_PUSH(C++)
+     # Workaround for Dyninst requiring DYNINST_TBB_HAS_VERSION_H on newer TBB versions
+     AC_CHECK_HEADERS([tbb/version.h], [DYNINST_CXXFLAGS="$DYNINST_CXXFLAGS -DDYNINST_TBB_HAS_VERSION_H"])
+     CPPFLAGS="$CPPFLAGS $DYNINST_CXXFLAGS"
      for location in /usr/lib64/dyninst /usr/lib/dyninst ${libdir}/dyninst; do
-       LDFLAGS="-L${location}"
+         LDFLAGS="-L${location}"
          LIBS="-lparseAPI ${BOOST_SYSTEM_LIB}"
 	   AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <dyninst/CodeSource.h>]],
 					   [[char *s; Dyninst::ParseAPI::SymtabCodeSource *sts = new Dyninst::ParseAPI::SymtabCodeSource(s);]])],
@@ -670,6 +696,7 @@ no) ;;
 					   [found_DYNINST_LDFLAGS=yes],[found_DYNINST_LDFLAGS=no])
        if test "$found_DYNINST_LDFLAGS" = "yes"; then
          DYNINST_LDFLAGS="$LDFLAGS"
+         AC_MSG_NOTICE([dyninst libraries found in $DYNINST_LDFLAGS])
 	 break
        fi
      done
@@ -694,6 +721,8 @@ no) ;;
     AC_CHECK_LIB(tbb, TBB_runtime_interface_version, [tbb_LIBS=-ltbb],[tbb_LIBS=])       
     LIBS="$save_LIBS"
     DYNINST_LIBS="-lparseAPI -lsymtabAPI -linstructionAPI $tbb_LIBS -lcommon"
+    # Workaround for Dyninst requiring DYNINST_TBB_HAS_VERSION_H on newer TBB versions
+    AC_CHECK_HEADERS([tbb/version.h], [DYNINST_CXXFLAGS="$DYNINST_CXXFLAGS -DDYNINST_TBB_HAS_VERSION_H"])
     ;;
 esac
 if test "$with_dyninst" != "no"; then
@@ -754,37 +783,6 @@ dnl See if we have enough libraries and tools to build the virt server
 fi
 AM_CONDITIONAL([BUILD_VIRT], [test "${have_libvirt}" = "yes" -a "${have_libxml2}" = "yes" -a "$enable_virt" != "no"])
 
-dnl Handle the option to build python2 probe support
-AC_ARG_WITH([python2-probes],
-  AS_HELP_STRING([--without-python2-probes],
-    [Disable building python version 2 probe support, even if it is available]))
-have_python2_support=no
-AS_IF([test "x$with_python2_probes" != "xno"],
-  [dnl First, check to make sure we have the 'python-config' script.
-   AS_IF([test "x$PYTHON" != "x:"],
-	 [AC_PATH_PROGS([PYTHON_CONFIG], [${python_basename}-config python2-config python-config])])
-   AS_IF([test "x$PYTHON_CONFIG" != "x"],
-	 [dnl Use the 'python-config' script to find the python
-	  dnl include directories.
-	  PYTHON_CPPFLAGS=`$PYTHON_CONFIG --includes 2> /dev/null`
-	  AC_SUBST([PYTHON_CPPFLAGS], [$PYTHON_CPPFLAGS])
-	  save_CPPFLAGS="$CPPFLAGS"
-	  CPPFLAGS="$PYTHON_CPPFLAGS $CPPFLAGS"
-	  dnl Now make sure we can find the python 2 Python.h file. We
-	  dnl need to clear the cached result, since this might be a
-	  dnl cached result from the python 3 header file (since they
-	  dnl share the same name).
-	  AS_UNSET([ac_cv_header_Python_h])
-	  AC_CHECK_HEADERS([Python.h], [have_python2_support=yes])
-	  CPPFLAGS="$save_CPPFLAGS"])])
-AS_IF([test "x$have_python2_support" = "xyes"],
-  [AC_DEFINE([HAVE_PYTHON2_PROBES], [1],
-    [Define to 1 to enable python version 2 probe support in systemtap.])],
-  [AS_IF([test "x$with_python2_probes" = "xyes"],
-    [AC_MSG_ERROR([python version 2 probe support requested but not found])])
-])
-AM_CONDITIONAL([HAVE_PYTHON2_PROBES], [test "x$have_python2_support" = "xyes"])
-
 dnl Handle the option to build python3 probe support
 AC_ARG_WITH([python3-probes],
   AS_HELP_STRING([--without-python3-probes],
@@ -801,13 +799,7 @@ AS_IF([test "x$with_python3_probes" != "xno"],
 	  AC_SUBST([PYTHON3_CPPFLAGS], [$PYTHON3_CPPFLAGS])
 	  save_CPPFLAGS="$CPPFLAGS"
 	  CPPFLAGS="$PYTHON3_CPPFLAGS $CPPFLAGS"
-	  dnl Now make sure we can find the python 3 Python.h
-	  dnl file. However, we've got a problem. AC_CHECK_HEADERS
-	  dnl was called above for the python 2 version of
-	  dnl Python.h. But, autoconf doesn't really know the
-	  dnl difference between the two files, since they both have
-	  dnl the same name. So, we'll unset the cache variable.
-	  AS_UNSET([ac_cv_header_Python_h])
+	  dnl Now make sure we can find the python 3 Python.h file.
 	  AC_CHECK_HEADERS([Python.h], [have_python3_support=yes])
 	  CPPFLAGS="$save_CPPFLAGS"])])
 AS_IF([test "x$have_python3_support" = "xyes"],
@@ -820,7 +812,7 @@ AM_CONDITIONAL([HAVE_PYTHON3_PROBES], [test "x$have_python3_support" = "xyes"])
 
 dnl We want either (or both) python probe support.
 AM_CONDITIONAL([HAVE_PYTHON_PROBES],
-  [test "x$have_python2_support" = "xyes" -o "x$have_python3_support" = "xyes"])
+  [test "x$have_python3_support" = "xyes"])
 
 PKG_CHECK_MODULES([jsonc], [json-c >= 0.13], [have_jsonc=yes], [have_jsonc=no])
 PKG_CHECK_MODULES([ncurses], [ncurses], [have_ncurses=yes], [have_ncurses=no])
@@ -909,6 +901,29 @@ AC_CHECK_DECLS([BPF_PROG_TYPE_RAW_TRACEPOINT],
                [],
                [#include <linux/bpf.h>])
 
+AC_CHECK_DECLS([BPF_PROG_TYPE_LSM],
+               [AC_DEFINE([HAVE_BPF_PROG_TYPE_LSM], [1], [Define to 1 if you have BPF LSM support in bpf.h])],
+               [],
+               [#include <linux/bpf.h>])
+
+AC_CHECK_DECLS([BPF_PROG_TYPE_XDP],
+               [AC_DEFINE([HAVE_BPF_PROG_TYPE_XDP], [1], [Define to 1 if you have BPF XDP support in bpf.h])],
+               [],
+               [#include <linux/bpf.h>])
+
+dnl Optional libbpf support for LSM hook BTF ID resolution
+AC_ARG_WITH([libbpf],
+  AS_HELP_STRING([--without-libbpf],
+    [Do not use libbpf even if present]))
+
+AS_IF([test "x$with_libbpf" != "xno"], [
+  PKG_CHECK_MODULES([libbpf], [libbpf >= 1.0],
+    [have_libbpf=yes
+     AC_DEFINE([HAVE_LIBBPF], [1], [Define to 1 if you have libbpf])],
+    [have_libbpf=no])
+])
+AM_CONDITIONAL([HAVE_LIBBPF], [test "x$have_libbpf" = "xyes"])
+
 dnl Optional libselinux support allows stapdyn to check
 dnl for booleans that would prevent Dyninst from working.
 AC_ARG_WITH([selinux],
@@ -946,6 +961,29 @@ if test ! -d "$with_java"; then
    AC_MSG_NOTICE([directory $with_java not found, disabling java support])
    with_java=no
 fi
+
+dnl PR34475: some JDKs ship javac but fail at VM init (e.g.
+dnl java-25-openjdk-25-0.1.0.8-1.0.riscv64.fc42 with SV57 satp).  Also
+dnl catch language-level rejection of the real HelperSDT sources before
+dnl we commit to building java support.
+if test "$with_java" != "no"; then
+  AC_MSG_CHECKING([whether javac can compile HelperSDT])
+  rm -rf conftest.javac
+  mkdir -p conftest.javac/org/systemtap/byteman/helper
+  sed 's|@pkglibexecdir@|/tmp|g' \
+    "$srcdir/java/org/systemtap/byteman/helper/HelperSDT.java.in" \
+    > conftest.javac/org/systemtap/byteman/helper/HelperSDT.java
+  if (cd conftest.javac && javac -d . org/systemtap/byteman/helper/HelperSDT.java) >conftest.javac.out 2>&1; then
+    AC_MSG_RESULT([yes])
+  else
+    AC_MSG_RESULT([no])
+    cat conftest.javac.out >&AS_MESSAGE_LOG_FD
+    AC_MSG_NOTICE([javac cannot compile HelperSDT.java, disabling java support])
+    with_java=no
+  fi
+  rm -rf conftest.javac conftest.javac.out
+fi
+
 AC_SUBST(JAVADIR, "${with_java}") # always needed to compile
 
 if test "$with_java" != "no"; then
@@ -1004,10 +1042,12 @@ dnl not like exec_prefix=${prefix}
 
 AC_CONFIG_FILES([Makefile doc/Makefile man/Makefile man/cs/Makefile \
 doc/beginners/Makefile doc/SystemTap_Tapset_Reference/Makefile \
-man/stap.1 man/stappaths.7 man/systemtap-service.8 \
+man/stap.1 man/stappaths.7 man/stap-onboot.8 \
 man/cs/stap.1 man/cs/stappaths.7 man/cs/systemtap.8 \
-initscript/config.systemtap initscript/config.stap-server \
-initscript/systemtap initscript/stap-server \
+initscript/config.stap-server \
+initscript/stap-server \
+initscript/stap-service-prepare initscript/stap-onboot \
+initscript/stap@.service initscript/staprun@.service \
 initscript/99stap/module-setup.sh \
 initscript/99stap/install \
 initscript/99stap/check ])

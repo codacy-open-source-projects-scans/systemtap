@@ -44,8 +44,8 @@
 	modtime = _struct_compat_utimbuf_modtime(buf_uaddr)
 %)
 
-probe syscall.utime = dw_syscall.utime !, nd_syscall.utime ? {}
-probe syscall.utime.return = dw_syscall.utime.return !,
+probe syscall.utime = tp_syscall.utime !, dw_syscall.utime !, nd_syscall.utime ? {}
+probe syscall.utime.return = tp_syscall.utime.return !, dw_syscall.utime.return !,
                              nd_syscall.utime.return ? {}
 
 # dw_utime _____________________________________________________
@@ -92,10 +92,10 @@ probe nd2_syscall.utime = kprobe.function(@arch_syscall_prefix "sys_utime") ?
         %( @_IS_SREG_KERNEL %? @_SYSCALL_UTIME_REGARGS_STORE %)
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.utime = kernel.trace("sys_enter")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.utime = tp_syscall("utime") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_gate(@const("__NR_utime"))
 	@_SYSCALL_UTIME_NAME
 	@_SYSCALL_UTIME_REGARGS
@@ -121,20 +121,20 @@ probe nd2_syscall.utime.return = kprobe.function(@arch_syscall_prefix "sys_utime
 	@SYSC_RETVALSTR(returnval())
 }
  
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.utime.return = kernel.trace("sys_exit")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.utime.return = tp_syscall("utime").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_gate(@const("__NR_utime"))
 	@_SYSCALL_UTIME_NAME
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }
 
 # long compat_sys_utime(char __user *filename, struct compat_utimbuf __user *t)
 
-probe syscall.compat_utime = dw_syscall.compat_utime !,
+probe syscall.compat_utime = tp_syscall.compat_utime !, dw_syscall.compat_utime !,
                              nd_syscall.compat_utime ? {}
-probe syscall.compat_utime.return = dw_syscall.compat_utime.return !,
+probe syscall.compat_utime.return = tp_syscall.compat_utime.return !, dw_syscall.compat_utime.return !,
                                     nd_syscall.compat_utime.return ? {}
 
 # dw_compat_utime _____________________________________________________
@@ -180,10 +180,10 @@ probe nd2_syscall.compat_utime = kprobe.function(@arch_syscall_prefix "compat_sy
         %( @_IS_SREG_KERNEL %? @_SYSCALL_UTIME_REGARGS_STORE %)
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.compat_utime = kernel.trace("sys_enter")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.compat_utime = tp_syscall("~compat_utime") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__compat_syscall_gate(@const("__NR_compat_utime"))
 	@_SYSCALL_UTIME_NAME
 	@_SYSCALL_COMPAT_UTIME_REGARGS
@@ -209,11 +209,11 @@ probe nd2_syscall.compat_utime.return = kprobe.function(@arch_syscall_prefix "co
 	@SYSC_RETVALSTR(returnval())
 }
  
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.compat_utime.return = kernel.trace("sys_exit")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.compat_utime.return = tp_syscall("~compat_utime").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__compat_syscall_gate(@const("__NR_compat_utime"))
 	@_SYSCALL_UTIME_NAME
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }

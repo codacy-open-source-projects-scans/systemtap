@@ -29,8 +29,8 @@
 	  set_pointer_arg(2, res_uaddr)
 %)
 
-probe syscall.clock_getres = dw_syscall.clock_getres !, nd_syscall.clock_getres ? {}
-probe syscall.clock_getres.return = dw_syscall.clock_getres.return !, nd_syscall.clock_getres.return ? {}
+probe syscall.clock_getres = tp_syscall.clock_getres !, dw_syscall.clock_getres !, nd_syscall.clock_getres ? {}
+probe syscall.clock_getres.return = tp_syscall.clock_getres.return !, dw_syscall.clock_getres.return !, nd_syscall.clock_getres.return ? {}
 
 # dw_clock_getres _____________________________________________________
 
@@ -76,7 +76,7 @@ probe nd1_syscall.clock_getres = kprobe.function("compat_clock_getres") ?,
 	@_SYSCALL_CLOCK_GETRES_REGARGS
 	@_SYSCALL_CLOCK_GETRES_ARGSTR
 }
-probe __nd1_syscall.clock_getres = kprobe.function("sys_clock_getres")
+probe __nd1_syscall.clock_getres = kprobe.function("sys_clock_getres") ?
 {
 	@__syscall_gate(@const("__NR_clock_getres"))
 }
@@ -94,11 +94,11 @@ probe nd2_syscall.clock_getres = kprobe.function(@arch_syscall_prefix "compat_sy
         %( @_IS_SREG_KERNEL %? @_SYSCALL_CLOCK_GETRES_REGARGS_STORE %)
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.clock_getres = kernel.trace("sys_enter")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.clock_getres = tp_syscall("clock_getres,~compat_clock_getres,~compat_clock_getres_time64") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
-	@__syscall_compat_gate(@const("__NR_clock_getres"), @const("__NR_compat_clock_getres"))
+	@__set_syscall_pt_regs
+	@__syscall_compat_gate2(@const("__NR_clock_getres"), @const("__NR_compat_clock_getres"), @const("__NR_compat_clock_getres_time64"))
 	@_SYSCALL_CLOCK_GETRES_NAME
 	@_SYSCALL_CLOCK_GETRES_REGARGS
 	@_SYSCALL_CLOCK_GETRES_ARGSTR
@@ -110,7 +110,7 @@ probe tp_syscall.clock_getres = kernel.trace("sys_enter")
 probe nd_syscall.clock_getres.return = nd1_syscall.clock_getres.return!, nd2_syscall.clock_getres.return!, tp_syscall.clock_getres.return
   { }
 
-probe nd1_syscall.clock_getres.return =
+probe nd1_syscall.clock_getres.return = 
 	kprobe.function("compat_clock_getres").return ?,
 	kprobe.function("compat_sys_clock_getres").return ?,
 	__nd1_syscall.clock_getres.return ?
@@ -118,8 +118,8 @@ probe nd1_syscall.clock_getres.return =
 	@_SYSCALL_CLOCK_GETRES_NAME
 	@SYSC_RETVALSTR(returnval())
 }
-probe __nd1_syscall.clock_getres.return =
-	kprobe.function("sys_clock_getres").return
+probe __nd1_syscall.clock_getres.return = 
+	kprobe.function("sys_clock_getres").return ?
 {
 	@__syscall_gate(@const("__NR_clock_getres"))
 }
@@ -133,11 +133,11 @@ probe nd2_syscall.clock_getres.return =
 	@SYSC_RETVALSTR(returnval())
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.clock_getres.return = kernel.trace("sys_exit")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.clock_getres.return = tp_syscall("clock_getres,~compat_clock_getres,~compat_clock_getres_time64").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
-	@__syscall_compat_gate(@const("__NR_clock_getres"), @const("__NR_compat_clock_getres"))
+	@__set_syscall_pt_regs
+	@__syscall_compat_gate2(@const("__NR_clock_getres"), @const("__NR_compat_clock_getres"), @const("__NR_compat_clock_getres_time64"))
 	@_SYSCALL_CLOCK_GETRES_NAME
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }

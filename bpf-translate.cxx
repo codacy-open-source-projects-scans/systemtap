@@ -366,6 +366,9 @@ bpf_unparser::get_exit_block()
 
   set_block(exit);
   add_epilogue();
+  // LSM and other probes that need a return value require R0 to be set
+  // before exit. Set it to 0 (success/allow) by default.
+  this_prog.mk_mov(this_ins, this_prog.lookup_reg(BPF_REG_0), this_prog.new_imm(0));
   this_prog.mk_exit(this_ins);
 
   set_block(cont);
@@ -784,6 +787,58 @@ bpf_unparser::emit_store(expression *e, value *val)
 	  return;
         } 
     } 
+  else if (target_deref *td = dynamic_cast<target_deref *>(e)) // deref lvalue
+    {
+      // Stores through @cast / @kderef chains, used for packet rewriting
+      // in xdp handlers (and direct memory writes elsewhere).
+      expression *addr = td->addr;
+      int hoff = 0;
+      binary_expression *bin = dynamic_cast<binary_expression *>(addr);
+      literal_number *ln = NULL;
+      if (bin && bin->op == "+"
+          && (ln = dynamic_cast<literal_number *>(bin->right)) != NULL)
+        { addr = bin->left; hoff = (int) ln->value; }
+
+      value *src = emit_expr (addr);
+
+      int opc;
+      switch (td->size)
+        {
+        case 1: opc = BPF_B; break;
+        case 2: opc = BPF_H; break;
+        case 4: opc = BPF_W; break;
+        default: opc = BPF_DW; break;
+        }
+
+      if (this_prog.xdp_mode)
+        {
+          // Writing packet bytes needs the same data_end bound check as reads.
+          block *checked_block = this_prog.new_block ();
+          block *skip_block = this_prog.new_block ();
+          block *join_block = this_prog.new_block ();
+          value *data_end = this_prog.new_reg ();
+          value *t = this_prog.new_reg ();
+
+          this_prog.mk_ld (this_ins, BPF_W, data_end, this_in_arg0, 4);
+          emit_mov (t, src);
+          this_prog.mk_binary (this_ins, BPF_ADD, t, t,
+                               this_prog.new_imm (hoff + td->size));
+          this_prog.mk_jcond (this_ins, GTU, t, data_end, skip_block, checked_block);
+
+          set_block (checked_block);
+          this_prog.mk_st (this_ins, opc, src, hoff, val);
+          emit_jmp (join_block);
+
+          set_block (skip_block); // out of range: skip the write
+          emit_jmp (join_block);
+
+          set_block (join_block);
+        }
+      else
+        this_prog.mk_st (this_ins, opc, src, hoff, val);
+
+      return;
+    }
  err:
   throw SEMANTIC_ERROR (_("unknown lvalue"), e->tok);
 }
@@ -2046,6 +2101,11 @@ bpf_unparser::visit_try_block (try_block* s)
       value* catch_var = j->second;
 
       // This message is stored during jump_to_catch.
+      // If catch_msg is empty, the try-catch was constructed in a way
+      // that BPF cannot handle (e.g., using embedded C instead of BPF asm).
+      if (catch_msg.empty())
+        throw SEMANTIC_ERROR(_("try-catch block requires BPF-compatible error handling (no embedded C code allowed)"), s->tok);
+
       value* error_var = catch_msg.back();
       catch_msg.pop_back();
 
@@ -2301,7 +2361,7 @@ bpf_unparser::visit_foreach_loop(foreach_loop* s)
                        frame, newkey_ofs);
   this_prog.mk_mov (this_ins, this_prog.lookup_reg(BPF_REG_4), id);
   this_prog.mk_mov (this_ins, this_prog.lookup_reg(BPF_REG_5), limit);
-  this_prog.mk_call (this_ins, BPF_FUNC_map_get_next_key, 5);
+  this_prog.mk_call (this_ins, (bpf_func_id)BPF_FUNC_map_get_next_key, 5);
   this_prog.mk_jcond (this_ins, NE, this_prog.lookup_reg(BPF_REG_0), i0,
                       join_block, load_block_1);
 
@@ -2325,7 +2385,7 @@ bpf_unparser::visit_foreach_loop(foreach_loop* s)
                        frame, newkey_ofs);
   this_prog.mk_mov (this_ins, this_prog.lookup_reg(BPF_REG_4), id);
   this_prog.mk_mov (this_ins, this_prog.lookup_reg(BPF_REG_5), limit);
-  this_prog.mk_call (this_ins, BPF_FUNC_map_get_next_key, 5);
+  this_prog.mk_call (this_ins, (bpf_func_id)BPF_FUNC_map_get_next_key, 5);
   this_prog.mk_jcond (this_ins, NE, this_prog.lookup_reg(BPF_REG_0), i0,
                       join_block, load_block_1);
 
@@ -2840,7 +2900,7 @@ bpf_unparser::visit_concatenation (concatenation* e)
       this_prog.mk_mov(this_ins, this_prog.lookup_reg(BPF_REG_2), placeholder_next);
 
       // Call function to concatenate. 
-      this_prog.mk_call(this_ins, BPF_FUNC_str_concat, 2);
+      this_prog.mk_call(this_ins, (bpf_func_id)BPF_FUNC_str_concat, 2);
 
       result_str = this_prog.new_reg();
       this_prog.mk_mov(this_ins, result_str, this_prog.lookup_reg(BPF_REG_0));
@@ -2955,18 +3015,6 @@ bpf_unparser::emit_context_var(bpf_context_vardecl *v)
       return d;
     }
 
-  value *frame = this_prog.lookup_reg(BPF_REG_10);
-
-  this_prog.mk_binary (this_ins, BPF_ADD, this_prog.lookup_reg(BPF_REG_3),
-                       this_in_arg0, this_prog.new_imm(v->offset));
-  this_prog.mk_mov (this_ins, this_prog.lookup_reg(BPF_REG_2),
-                    this_prog.new_imm(v->size));
-  this_prog.mk_binary (this_ins, BPF_ADD, this_prog.lookup_reg(BPF_REG_1),
-                       frame, this_prog.new_imm(-v->size));
-  this_prog.use_tmp_space (v->size);
-
-  this_prog.mk_call (this_ins, BPF_FUNC_probe_read, 3);
-
   int opc;
   switch (v->size)
     {
@@ -2978,7 +3026,30 @@ bpf_unparser::emit_context_var(bpf_context_vardecl *v)
     default: assert(0);
     }
 
-  this_prog.mk_ld (this_ins, opc, d, frame, -v->size);
+  if (this_prog.xdp_mode)
+    {
+      // XDP programs allow direct loads off the ctx pointer, which must
+      // use the pristine register with insn-encoded offsets.
+      if (v->size >= 8 && v->offset == 0)
+        return this_in_arg0; // pointer-style access, no load needed
+      this_prog.mk_ld (this_ins, opc, d, this_in_arg0, v->offset);
+    }
+  else
+    {
+      value *frame = this_prog.lookup_reg(BPF_REG_10);
+
+      this_prog.mk_binary (this_ins, BPF_ADD, this_prog.lookup_reg(BPF_REG_3),
+                           this_in_arg0, this_prog.new_imm(v->offset));
+      this_prog.mk_mov (this_ins, this_prog.lookup_reg(BPF_REG_2),
+                        this_prog.new_imm(v->size));
+      this_prog.mk_binary (this_ins, BPF_ADD, this_prog.lookup_reg(BPF_REG_1),
+                           frame, this_prog.new_imm(-v->size));
+      this_prog.use_tmp_space (v->size);
+
+      this_prog.mk_call (this_ins, BPF_FUNC_probe_read, 3);
+
+      this_prog.mk_ld (this_ins, opc, d, frame, -v->size);
+    }
 
   if (v->is_signed && v->size < 8)
     {
@@ -3212,18 +3283,25 @@ bpf_unparser::visit_target_deref (target_deref* e)
   // and kernelspace with the same function.  For others, like s390x,
   // this only works to read kernelspace.
 
-  value *src = emit_expr (e->addr);
-  value *frame = this_prog.lookup_reg (BPF_REG_10);
+  // For xdp-mode loads, peel a trailing `expr + literal` off the address
+  // arithmetic so the final insn offset stays on the pristine ctx/pkt
+  // register, which the xdp ctx/pkt access checks require.
+  expression *addr = e->addr;
+  int hoff = 0;
+  binary_expression *bin = dynamic_cast<binary_expression *>(addr);
+  literal_number *ln = NULL;
+  if (bin && bin->op == "+"
+      && (ln = dynamic_cast<literal_number *>(bin->right)) != NULL)
+    {
+      addr = bin->left;
+      hoff = (int)ln->value;
+    }
 
-  this_prog.mk_mov (this_ins, this_prog.lookup_reg(BPF_REG_3), src);
-  this_prog.mk_mov (this_ins, this_prog.lookup_reg(BPF_REG_2),
-		    this_prog.new_imm (e->size));
-  this_prog.mk_binary (this_ins, BPF_ADD, this_prog.lookup_reg(BPF_REG_1),
-		       frame, this_prog.new_imm (-(int64_t)e->size));
-  this_prog.use_tmp_space(e->size);
+  symbol *sym = dynamic_cast<symbol *>(addr);
+  bool ctx_base = (sym != NULL && sym->referent != NULL
+                   && dynamic_cast<bpf_context_vardecl *> (sym->referent) != NULL);
 
-  this_prog.mk_call(this_ins, BPF_FUNC_probe_read, 3);
-
+  value *src = emit_expr (addr);
   value *d = this_prog.new_reg ();
   int opc;
   switch (e->size)
@@ -3235,7 +3313,62 @@ bpf_unparser::visit_target_deref (target_deref* e)
     default:
       throw SEMANTIC_ERROR(_("unhandled deref size"), e->tok);
     }
-  this_prog.mk_ld (this_ins, opc, d, frame, -e->size);
+
+      if (this_prog.xdp_mode)
+        {
+          if (ctx_base || (src->is_reg() && src->reg() == this_in_arg0->reg()))
+            {
+              // Plain ctx-member access: insn offset on the pristine ctx
+              // register, as the xdp ctx access checks require.
+              this_prog.mk_ld (this_ins, opc, d, this_in_arg0, hoff);
+            }
+          else
+            {
+              // Direct packet access: bounds-check against data_end first,
+              // defaulting the result to 0 when out of range.
+              block *checked_block = this_prog.new_block ();
+              block *skip_block = this_prog.new_block ();
+              block *join_block = this_prog.new_block ();
+              value *data_end = this_prog.new_reg ();
+              value *t = this_prog.new_reg ();
+
+              this_prog.mk_ld (this_ins, BPF_W, data_end, this_in_arg0, 4);
+              emit_mov (d, this_prog.new_imm (0));
+              emit_mov (t, src);
+              this_prog.mk_binary (this_ins, BPF_ADD, t, t,
+                                   this_prog.new_imm (hoff + e->size));
+              this_prog.mk_jcond (this_ins, GTU, t, data_end, skip_block, checked_block);
+
+              set_block (checked_block);
+              // Load from the base register with the folded insn offset;
+              // the comparison above proved src+hoff+size within data_end.
+              this_prog.mk_ld (this_ins, opc, d, src, hoff);
+              emit_jmp (join_block);
+
+              set_block (skip_block); // d already defaulted to 0
+              emit_jmp (join_block);
+
+              set_block (join_block);
+            }
+        }
+  else
+    {
+      value *frame = this_prog.lookup_reg (BPF_REG_10);
+
+      if (hoff != 0)
+        this_prog.mk_binary (this_ins, BPF_ADD, src, src,
+                             this_prog.new_imm (hoff));
+      this_prog.mk_mov (this_ins, this_prog.lookup_reg(BPF_REG_3), src);
+      this_prog.mk_mov (this_ins, this_prog.lookup_reg(BPF_REG_2),
+		        this_prog.new_imm (e->size));
+      this_prog.mk_binary (this_ins, BPF_ADD, this_prog.lookup_reg(BPF_REG_1),
+		           frame, this_prog.new_imm (-(int64_t)e->size));
+      this_prog.use_tmp_space(e->size);
+
+      this_prog.mk_call(this_ins, BPF_FUNC_probe_read, 3);
+
+      this_prog.mk_ld (this_ins, opc, d, frame, -e->size);
+    }
 
   if (e->signed_p && e->size < 8)
     {
@@ -3420,17 +3553,6 @@ bpf_unparser::visit_target_register (target_register* e)
       throw SEMANTIC_ERROR(_("unhandled register number"), e->tok);
     }
 
-  value *frame = this_prog.lookup_reg (BPF_REG_10);
-  this_prog.mk_binary (this_ins, BPF_ADD, this_prog.lookup_reg(BPF_REG_3),
-                       this_in_arg0, this_prog.new_imm (ofs));
-  this_prog.mk_mov (this_ins, this_prog.lookup_reg(BPF_REG_2),
-		    this_prog.new_imm (size));
-  this_prog.mk_binary (this_ins, BPF_ADD, this_prog.lookup_reg(BPF_REG_1),
-		       frame, this_prog.new_imm (-size));
-  this_prog.use_tmp_space(size);
-
-  this_prog.mk_call(this_ins, BPF_FUNC_probe_read, 3);
-
   value *d = this_prog.new_reg ();
   int opc;
   switch (size)
@@ -3440,7 +3562,30 @@ bpf_unparser::visit_target_register (target_register* e)
     default:
       throw SEMANTIC_ERROR(_("unhandled register size"), e->tok);
     }
-  this_prog.mk_ld (this_ins, opc, d, frame, -size);
+
+  if (this_prog.xdp_mode)
+    {
+      // XDP programs allow direct loads off ctx-derived pointers.
+      value *p = this_prog.new_reg ();
+      this_prog.mk_binary (this_ins, BPF_ADD, p, this_in_arg0,
+                           this_prog.new_imm (ofs));
+      this_prog.mk_ld (this_ins, opc, d, p, 0);
+    }
+  else
+    {
+      value *frame = this_prog.lookup_reg (BPF_REG_10);
+      this_prog.mk_binary (this_ins, BPF_ADD, this_prog.lookup_reg(BPF_REG_3),
+                           this_in_arg0, this_prog.new_imm (ofs));
+      this_prog.mk_mov (this_ins, this_prog.lookup_reg(BPF_REG_2),
+		        this_prog.new_imm (size));
+      this_prog.mk_binary (this_ins, BPF_ADD, this_prog.lookup_reg(BPF_REG_1),
+		           frame, this_prog.new_imm (-size));
+      this_prog.use_tmp_space(size);
+
+      this_prog.mk_call(this_ins, BPF_FUNC_probe_read, 3);
+
+      this_prog.mk_ld (this_ins, opc, d, frame, -size);
+    }
   result = d;
 }
 
@@ -3749,8 +3894,17 @@ bpf_unparser::visit_functioncall (functioncall *e)
   std::vector<value *> args;
   for (unsigned n = e->args.size (), i = 0; i < n; ++i)
     {
+      value *a = emit_expr (e->args[i]);
+      // Keep the pristine ctx register identity through parameter binding,
+      // so ctx-member loads can use insn offsets on the original register.
+      if (this_prog.xdp_mode && a->is_reg() && this_in_arg0
+          && a->reg() == this_in_arg0->reg())
+        {
+          args.push_back(a);
+          continue;
+        }
       value *r = this_prog.new_reg ();
-      emit_mov (r, emit_expr (e->args[i]));
+      emit_mov (r, a);
       args.push_back(r);
     }
 
@@ -3940,7 +4094,7 @@ bpf_unparser::emit_print_format (const std::string& format,
       for (size_t i = 0; i < nargs; ++i)
         emit_mov(this_prog.lookup_reg(BPF_REG_3 + i), actual[i]);
 
-      this_prog.mk_call(this_ins, BPF_FUNC_sprintf, nargs + 2);
+      this_prog.mk_call(this_ins, (bpf_func_id)BPF_FUNC_sprintf, nargs + 2);
       return this_prog.lookup_reg(BPF_REG_0);
     }
 
@@ -4164,7 +4318,7 @@ bpf_unparser::visit_stat_op (stat_op* e)
   uint64_t sc_type = globals::intern_sc_type(e->ctype);
   emit_mov(this_prog.lookup_reg(BPF_REG_3), this_prog.new_imm(sc_type));
 
-  this_prog.mk_call (this_ins, BPF_FUNC_stapbpf_stat_get, 3);
+  this_prog.mk_call (this_ins, (bpf_func_id)BPF_FUNC_stapbpf_stat_get, 3);
 
   result = this_prog.new_reg();
   emit_mov(result, this_prog.lookup_reg(BPF_REG_0));
@@ -4534,6 +4688,8 @@ output_stapbpf_script_name(BPF_Output &eo, const std::string script_name)
   Elf_Data *data = so->data;
   size_t script_name_len = strlen(script_name.c_str());
   data->d_buf = (void *)malloc(script_name_len + 1);
+  if (!data->d_buf)
+    throw SEMANTIC_ERROR(_("out of memory allocating BPF script name"));
   char *script_name_buf = (char *)data->d_buf;
   script_name.copy(script_name_buf, script_name_len);
   script_name_buf[script_name_len] = '\0';
@@ -4694,6 +4850,8 @@ output_interned_aggregates(BPF_Output &eo, globals& glob)
   unsigned n_aggregates =
     glob.scalar_stats.empty() ? glob.aggregates.size() : glob.aggregates.size() + 1;
   data->d_buf = (void *)calloc(n_aggregates, interned_aggregate_len);
+  if (!data->d_buf)
+    throw SEMANTIC_ERROR(_("out of memory allocating BPF aggregate metadata"));
   data->d_size = interned_aggregate_len * n_aggregates;
   size_t ofs = 0; // XXX after glob.scalar_stats
   if (!glob.scalar_stats.empty())
@@ -4729,6 +4887,8 @@ output_foreach_loop_info(BPF_Output &eo, globals& glob)
     sizeof(uint64_t) * globals::n_foreach_info_fields;
   unsigned n_foreach_loops = glob.foreach_loop_info.size();
   data->d_buf = (void *)calloc(n_foreach_loops, interned_foreach_info_len);
+  if (!data->d_buf)
+    throw SEMANTIC_ERROR(_("out of memory allocating BPF foreach metadata"));
   data->d_size = interned_foreach_info_len * n_foreach_loops;
   size_t ofs = 0;
   uint64_t *ix = (uint64_t *)data->d_buf;
@@ -4934,10 +5094,76 @@ translate_probe(program &prog, globals &glob, derived_probe *dp)
 
   u.add_prologue();
 
+  // Initialize the verdict-return variable to its default if present:
+  // __lsm_return defaults to 0 (allow); __xdp_return defaults to XDP_PASS (2).
+  int default_ret = -1;
+  for (auto v : dp->locals)
+    {
+      default_ret = -1;
+      if (v->name == "__lsm_return")
+        default_ret = 0;
+      else if (v->name == "__xdp_return")
+        default_ret = 2; /* XDP_PASS */
+      if (default_ret >= 0)
+        {
+          auto i = u.this_locals->find(v);
+          if (i != u.this_locals->end())
+            prog.mk_mov(u.this_ins, i->second, prog.new_imm(default_ret));
+          break;
+        }
+    }
+
   dp->body->visit (&u);
 
   if (u.in_block())
-    u.emit_jmp(u.get_ret0_block());
+    {
+      // Check if this is a probe with a verdict return value
+      bool has_return = false;
+      vardecl *return_var = NULL;
+      int ret_default = 0;
+      for (auto v : dp->locals)
+        {
+          if (v->name == "__lsm_return")
+            {
+              has_return = true;
+              return_var = v;
+              ret_default = 0; /* allow */
+              break;
+            }
+          else if (v->name == "__xdp_return")
+            {
+              has_return = true;
+              return_var = v;
+              ret_default = 2; /* XDP_PASS */
+              break;
+            }
+        }
+
+      if (has_return)
+        {
+          // Load the verdict variable into R0 and exit directly (don't use
+          // get_exit_block because it would overwrite R0 with its own default)
+          auto i = u.this_locals->find(return_var);
+          if (i != u.this_locals->end())
+            {
+              value *ret_val = i->second;
+              prog.mk_mov(u.this_ins, prog.lookup_reg(BPF_REG_0), ret_val);
+            }
+          else
+            {
+              // If not found, default to the probe kind's accept verdict
+              prog.mk_mov(u.this_ins, prog.lookup_reg(BPF_REG_0), prog.new_imm(ret_default));
+            }
+          // Exit directly with our return value in R0
+          u.add_epilogue();
+          prog.mk_exit(u.this_ins);
+        }
+      else
+        {
+          // Normal probes return 0
+          u.emit_jmp(u.get_ret0_block());
+        }
+    }
 }
 
 static void
@@ -4988,11 +5214,17 @@ static void
 translate_init_and_probe_v(program &prog, globals &glob, init_block &b,
                      const std::vector<derived_probe *> &v)
 {
-  bpf_unparser u(prog, glob);
-  block *this_block = prog.new_block();
+   bpf_unparser u(prog, glob);
+   block *this_block = prog.new_block();
 
-  u.set_block(this_block);
-  b.visit(&u);
+   u.set_block(this_block);
+
+   // Create and clear the error status, like translate_probe_v does for
+   // its probes; add_epilogue (via get_ret0_block below) relies on it.
+   u.error_status = prog.new_reg();
+   prog.mk_mov(u.this_ins, u.error_status, prog.new_imm(0));
+
+   b.visit(&u);
 
   if (!v.empty())
     translate_probe_v(prog, glob, v);
@@ -5338,6 +5570,37 @@ translate_bpf_pass (systemtap_session& s)
             }
         }
 
+      if (s.lsm_derived_probes)
+        {
+          sort_for_bpf_probe_arg_vector lsm_v;
+          sort_for_bpf(s, s.lsm_derived_probes, lsm_v);
+
+          for (auto i = lsm_v.begin(); i != lsm_v.end(); ++i)
+            {
+              t = i->first->tok;
+              program p(target_kernel_bpf);
+              translate_probe(p, glob, i->first);
+              p.generate();
+              output_probe(eo, p, i->second, SHF_ALLOC);
+            }
+        }
+
+      if (s.xdp_derived_probes)
+        {
+          sort_for_bpf_probe_arg_vector xdp_v;
+          sort_for_bpf(s, s.xdp_derived_probes, xdp_v);
+
+          for (auto i = xdp_v.begin(); i != xdp_v.end(); ++i)
+            {
+              t = i->first->tok;
+              program p(target_kernel_bpf);
+              p.xdp_mode = true;
+              translate_probe(p, glob, i->first);
+              p.generate();
+              output_probe(eo, p, i->second, SHF_ALLOC);
+            }
+        }
+
       if (s.uprobe_derived_probes)
         {
           sort_for_bpf_probe_arg_vector uprobe_v;
@@ -5365,8 +5628,6 @@ translate_bpf_pass (systemtap_session& s)
         warn_for_bpf(s, s.netfilter_derived_probes, "netfilter probe");
       if (s.profile_derived_probes)
         warn_for_bpf(s, s.profile_derived_probes, "timer.profile probe");
-      if (s.mark_derived_probes)
-        warn_for_bpf(s, s.mark_derived_probes, "static marker probe");
       if (s.python_derived_probes)
         warn_for_bpf(s, s.python_derived_probes, "python probe");
       // s.task_finder_derived_probes -- synthetic

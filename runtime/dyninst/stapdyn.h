@@ -135,6 +135,31 @@ int stp_dyninst_exit_status(void);
     | STAPDYN_PROBE_FLAG_THREAD_BEGIN | STAPDYN_PROBE_FLAG_THREAD_END)
 
 
+/**** STAP 5.x : process.data hardware watchpoints ****/
+
+/* Access modes for stp_dyninst_hwbkpt_access(); map to Dyninst BP_W / BP_R|BP_W. */
+#define STAPDYN_HWBKPT_WRITE	1
+#define STAPDYN_HWBKPT_RW	2
+
+extern uint64_t stp_dyninst_hwbkpt_count(void);
+extern uint64_t stp_dyninst_hwbkpt_address(uint64_t index);
+extern uint64_t stp_dyninst_hwbkpt_length(uint64_t index);
+extern uint64_t stp_dyninst_hwbkpt_access(uint64_t index);
+/* Optional symbol name for process.data("name"); NULL if unused. */
+extern const char *stp_dyninst_hwbkpt_symbol(uint64_t index);
+
+extern int enter_dyninst_hwbkpt_probe(uint64_t index, struct pt_regs *regs);
+
+
+/**** STAP 5.x : third-party ubacktrace stash (stapdyn StackwalkerAPI) ****/
+
+/* Max bytes for a formatted user backtrace written by stapdyn. */
+#define STAPDYN_UBACKTRACE_MAX	8192
+
+/* Copy a formatted backtrace into the module stash (empty clears). */
+extern void stp_dyninst_ubacktrace_set(const char *bt);
+
+
 #pragma GCC visibility pop
 
 #ifdef __cplusplus

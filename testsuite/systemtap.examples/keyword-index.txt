@@ -2,7 +2,7 @@ SYSTEMTAP EXAMPLES INDEX BY KEYWORD
 (see also index.txt)
 
 
-For systemtap version 5.5.
+For systemtap version 5.7.
 
 = _BEST =
 
@@ -436,6 +436,23 @@ keywords: memory bpf
   # stap mmwriteback.stp -T 1
 
 
+network/bpf_xdp.stp - Count Incoming Packets Per Protocol via XDP
+keywords: network xdp bpf
+
+  Decode the ethertype of incoming packets using an XDP program
+
+  # stap --runtime=bpf bpf_xdp.stp -T 3
+
+
+network/bpf_xdp_guru.stp - Bump IPv6 Hop Limits for Proxy Health Checks
+keywords: network xdp bpf
+
+  Count incoming IPv6 frames via an XDP program and rewrite the hop
+
+  # stap --runtime=bpf -g bpf_xdp_guru.stp -c "ping -6 -t 1 -c 10 localhost \
+  >/dev/null" -T 3
+
+
 network/sk_stream_wait_memory.stp - Track Start and Stop of Processes Due to Network Buffer Space
 keywords: network tcp process bpf
 
@@ -452,6 +469,15 @@ keywords: prometheus syscall bpf
 
   The syscallsrw.stp script tallies the read and write syscalls. This
   is a demo script for stapbpf prometheus-exporter scripts.
+
+
+security-band-aids/cve-2026-31431bpf.stp - cve-2026-31431 security band-aid (BPF LSM version)
+keywords: security guru bpf lsm
+
+  EXPERIMENTAL emergency security band-aid using BPF LSM hooks, blocks
+  AF_ALG AEAD socket binds
+
+  # stap -g --runtime=bpf -p4 cve-2026-31431bpf.stp
 
 
 = CALLGRAPH =
@@ -968,6 +994,36 @@ security-band-aids/cve-2023-4911.stp - cve-2023-4911 security band-aid
 keywords: security guru
 
   historical emergency security band-aid, for reference/education only
+
+
+security-band-aids/cve-2026-31431.stp - cve-2026-31431 security band-aid
+keywords: security guru
+
+  EXPERIMENTAL emergency security band-aid, for reference/education
+  only
+
+
+security-band-aids/cve-2026-31431bpf.stp - cve-2026-31431 security band-aid (BPF LSM version)
+keywords: security guru bpf lsm
+
+  EXPERIMENTAL emergency security band-aid using BPF LSM hooks, blocks
+  AF_ALG AEAD socket binds
+
+  # stap -g --runtime=bpf -p4 cve-2026-31431bpf.stp
+
+
+security-band-aids/cve-2026-46300.stp - cve-2026-46300 security band-aid
+keywords: security guru
+
+  EXPERIMENTAL emergency security band-aid, for reference/education
+  only
+
+
+security-band-aids/cve-2026-64600.stp - cve-2026-64600 security band-aid
+keywords: security guru
+
+  EXPERIMENTAL emergency security band-aid, for reference/education
+  only
 
 
 = INTERACTIVE =
@@ -1560,6 +1616,17 @@ keywords: process locking
   # stap semop-watch.stp -c 'sleep 2'
 
 
+= LSM =
+
+security-band-aids/cve-2026-31431bpf.stp - cve-2026-31431 security band-aid (BPF LSM version)
+keywords: security guru bpf lsm
+
+  EXPERIMENTAL emergency security band-aid using BPF LSM hooks, blocks
+  AF_ALG AEAD socket binds
+
+  # stap -g --runtime=bpf -p4 cve-2026-31431bpf.stp
+
+
 = MEMORY =
 
 general/sizeof.stp - Print the Size of a C Type
@@ -1965,6 +2032,23 @@ keywords: network nfs
   filesystems.
 
   # stap autofs4.stp -T 1
+
+
+network/bpf_xdp.stp - Count Incoming Packets Per Protocol via XDP
+keywords: network xdp bpf
+
+  Decode the ethertype of incoming packets using an XDP program
+
+  # stap --runtime=bpf bpf_xdp.stp -T 3
+
+
+network/bpf_xdp_guru.stp - Bump IPv6 Hop Limits for Proxy Health Checks
+keywords: network xdp bpf
+
+  Count incoming IPv6 frames via an XDP program and rewrite the hop
+
+  # stap --runtime=bpf -g bpf_xdp_guru.stp -c "ping -6 -t 1 -c 10 localhost \
+  >/dev/null" -T 3
 
 
 network/connect_stat.stp - Show Process Ancestry for IP Connections
@@ -3264,6 +3348,36 @@ keywords: security guru
   historical emergency security band-aid, for reference/education only
 
 
+security-band-aids/cve-2026-31431.stp - cve-2026-31431 security band-aid
+keywords: security guru
+
+  EXPERIMENTAL emergency security band-aid, for reference/education
+  only
+
+
+security-band-aids/cve-2026-31431bpf.stp - cve-2026-31431 security band-aid (BPF LSM version)
+keywords: security guru bpf lsm
+
+  EXPERIMENTAL emergency security band-aid using BPF LSM hooks, blocks
+  AF_ALG AEAD socket binds
+
+  # stap -g --runtime=bpf -p4 cve-2026-31431bpf.stp
+
+
+security-band-aids/cve-2026-46300.stp - cve-2026-46300 security band-aid
+keywords: security guru
+
+  EXPERIMENTAL emergency security band-aid, for reference/education
+  only
+
+
+security-band-aids/cve-2026-64600.stp - cve-2026-64600 security band-aid
+keywords: security guru
+
+  EXPERIMENTAL emergency security band-aid, for reference/education
+  only
+
+
 = SIGNALS =
 
 process/psig.stp - Print Process File Descriptors
@@ -3364,15 +3478,6 @@ keywords: simple guru
   friends!
 
   # stap -g keyhack.stp -c 'sleep 5'
-
-
-general/pyexample.stp - SystemTap python 2 support tapset
-keywords: simple
-
-  A python support tapset that displays backtraces and variable values
-
-  # PYTHONPATH=$PYEXECDIR stap -g --suppress-time-limits -c \
-  '/usr/bin/python3 -m HelperSDT pyexample.py 35' pyexample.stp python2
 
 
 general/pyexample.stp - SystemTap python 3 support tapset
@@ -4503,5 +4608,24 @@ keywords: memory watchpoint
   breakpoint hardware.
 
   # stap --all-modules hw_watch_sym.stp vm_dirty_ratio -T 5
+
+
+= XDP =
+
+network/bpf_xdp.stp - Count Incoming Packets Per Protocol via XDP
+keywords: network xdp bpf
+
+  Decode the ethertype of incoming packets using an XDP program
+
+  # stap --runtime=bpf bpf_xdp.stp -T 3
+
+
+network/bpf_xdp_guru.stp - Bump IPv6 Hop Limits for Proxy Health Checks
+keywords: network xdp bpf
+
+  Count incoming IPv6 frames via an XDP program and rewrite the hop
+
+  # stap --runtime=bpf -g bpf_xdp_guru.stp -c "ping -6 -t 1 -c 10 localhost \
+  >/dev/null" -T 3
 
 

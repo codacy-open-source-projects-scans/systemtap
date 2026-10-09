@@ -2,12 +2,12 @@
 .\"     Title: probe::tcp.receive
 .\"    Author: 
 .\" Generator: DocBook XSL Stylesheets vsnapshot <http://docbook.sf.net/>
-.\"      Date: October 2025
+.\"      Date: September 2026
 .\"    Manual: Networking Tapset
-.\"    Source: SystemTap Tapset Reference
+.\"    Source: SystemTap Tapset Reference Version 5.6
 .\"  Language: English
 .\"
-.TH "PROBE::TCP\&.RECEIVE" "3stap" "October 2025" "SystemTap Tapset Reference" "Networking Tapset"
+.TH "PROBE::TCP\&.RECEIVE" "3stap" "September 2026" "SystemTap Tapset Reference Ver" "Networking Tapset"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -32,48 +32,13 @@ probe::tcp.receive \- Called when a TCP packet is received
 .SH "SYNOPSIS"
 .sp
 .nf
-tcp\&.receive 
+probe tcp\&.receive {}
 .fi
 .SH "VALUES"
-.PP
-\fIprotocol\fR
-.RS 4
-Packet protocol from driver
-.RE
-.PP
-\fIiphdr\fR
-.RS 4
-IP header address
-.RE
 .PP
 \fIname\fR
 .RS 4
 Name of the probe point
-.RE
-.PP
-\fIsyn\fR
-.RS 4
-TCP SYN flag
-.RE
-.PP
-\fIfin\fR
-.RS 4
-TCP FIN flag
-.RE
-.PP
-\fIsport\fR
-.RS 4
-TCP source port
-.RE
-.PP
-\fIsaddr\fR
-.RS 4
-A string representing the source IP address
-.RE
-.PP
-\fIrst\fR
-.RS 4
-TCP RST flag
 .RE
 .PP
 \fIfamily\fR
@@ -81,9 +46,24 @@ TCP RST flag
 IP address family
 .RE
 .PP
-\fIpsh\fR
+\fIfin\fR
 .RS 4
-TCP PSH flag
+TCP FIN flag
+.RE
+.PP
+\fIiphdr\fR
+.RS 4
+IP header address
+.RE
+.PP
+\fIurg\fR
+.RS 4
+TCP URG flag
+.RE
+.PP
+\fIsyn\fR
+.RS 4
+TCP SYN flag
 .RE
 .PP
 \fIack\fR
@@ -91,9 +71,14 @@ TCP PSH flag
 TCP ACK flag
 .RE
 .PP
-\fIdaddr\fR
+\fIpsh\fR
 .RS 4
-A string representing the destination IP address
+TCP PSH flag
+.RE
+.PP
+\fIsaddr\fR
+.RS 4
+A string representing the source IP address
 .RE
 .PP
 \fIdport\fR
@@ -101,9 +86,24 @@ A string representing the destination IP address
 TCP destination port
 .RE
 .PP
-\fIurg\fR
+\fIdaddr\fR
 .RS 4
-TCP URG flag
+A string representing the destination IP address
+.RE
+.PP
+\fIsport\fR
+.RS 4
+TCP source port
+.RE
+.PP
+\fIprotocol\fR
+.RS 4
+Packet protocol from driver
+.RE
+.PP
+\fIrst\fR
+.RS 4
+TCP RST flag
 .RE
 .SH SEE ALSO\n 
 .IR tapset::tcp (3stap)

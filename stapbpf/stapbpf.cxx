@@ -38,6 +38,7 @@
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <net/if.h>
 #include <sys/mman.h>
 #include <sys/utsname.h>
 #include <sys/resource.h>
@@ -49,6 +50,8 @@
 extern "C" {
 #include <linux/bpf.h>
 #include <linux/perf_event.h>
+#include <linux/netlink.h>
+#include <linux/rtnetlink.h>
 /* Introduced in 4.1. */
 #ifndef PERF_EVENT_IOC_SET_BPF
 #define PERF_EVENT_IOC_SET_BPF _IOW('$', 8, __u32)
@@ -60,12 +63,31 @@ extern "C" {
 #include "../git_version.h"
 #include "../version.h"
 #include "../bpf-internal.h"
+#include "lsm-btf.h"
 
 #ifndef EM_BPF
 #define EM_BPF 0xeb9f
 #endif
 #ifndef R_BPF_MAP_FD
 #define R_BPF_MAP_FD 1
+#endif
+/* BPF LSM support introduced in kernel 5.7 */
+#ifndef BPF_PROG_TYPE_LSM
+#define BPF_PROG_TYPE_LSM ((enum bpf_prog_type)29)
+#endif
+#ifndef BPF_LSM_MAC
+#define BPF_LSM_MAC ((enum bpf_attach_type)27)
+#endif
+#ifndef BPF_LINK_CREATE
+#define BPF_LINK_CREATE ((enum bpf_cmd)28)
+#endif
+/* XDP support introduced in kernel 4.8; attach enum value matches headers
+   listing CGROUP_INET_INGRESS first (same convention as BPF_LSM_MAC=27). */
+#ifndef BPF_PROG_TYPE_XDP
+#define BPF_PROG_TYPE_XDP ((enum bpf_prog_type)6)
+#endif
+#ifndef BPF_XDP
+#define BPF_XDP ((enum bpf_attach_type)37)
 #endif
 
 using namespace std;
@@ -263,6 +285,29 @@ struct trace_data
   { }
 };
 
+struct lsm_data
+{
+  std::string hook_name;
+  int prog_fd;
+  int link_fd;  // BPF link keeps attachment alive
+
+  lsm_data(std::string name, int fd)
+    : hook_name(name), prog_fd(fd), link_fd(-1)
+  { }
+};
+
+struct xdp_data
+{
+  std::string ifaces;  // comma-separated interface names; empty = all up interfaces
+  int prog_fd;
+  std::vector<int> link_fds;     // BPF links keep attachments alive (kernel 5.9+)
+  std::vector<unsigned> rt_ifs;  // ifindexes attached via rtnetlink fallback
+
+  xdp_data(std::string ifs, int fd)
+    : ifaces(ifs), prog_fd(fd)
+  { }
+};
+
 static std::vector<procfsprobe_data> procfsprobes;
 static std::vector<kprobe_data> kprobes;
 static std::vector<timer_data> timers;
@@ -270,6 +315,8 @@ static std::vector<perf_data> perf_probes;
 static std::vector<trace_data> tracepoint_probes;
 static std::vector<trace_data> raw_tracepoint_probes;
 static std::vector<uprobe_data> uprobes;
+static std::vector<lsm_data> lsm_probes;
+static std::vector<xdp_data> xdp_probes;
 
 // TODO: Move fatal() to bpfinterp.h and replace abort() calls in the interpreter.
 // TODO: Add warn() option.
@@ -516,6 +563,14 @@ prog_load(Elf_Data *data, const char *name)
       else
         prog_type = BPF_PROG_TYPE_PERF_EVENT;
     }
+#if defined(HAVE_BPF_PROG_TYPE_LSM) && defined(HAVE_LIBBPF)
+  else if (strncmp(name, "lsm", 3) == 0)
+    prog_type = BPF_PROG_TYPE_LSM;
+#endif
+#ifdef HAVE_BPF_PROG_TYPE_XDP
+  else if (strncmp(name, "xdp", 3) == 0)
+    prog_type = BPF_PROG_TYPE_XDP;
+#endif
   else
     fatal("unhandled program type for section \"%s\"\n", name);
 
@@ -528,8 +583,58 @@ prog_load(Elf_Data *data, const char *name)
                module_basename, script_name, VERSION, name, (unsigned long)data->d_size);
       fflush (kmsg); // Otherwise, flush will only happen after the prog runs.
     }
-  int fd = bpf_prog_load(prog_type, static_cast<bpf_insn *>(data->d_buf),
-			 data->d_size, module_license, kernel_version);
+
+  int fd = -1;
+
+#if defined(HAVE_BPF_PROG_TYPE_LSM) && defined(HAVE_LIBBPF)
+  // LSM programs require BTF at load time
+  if (prog_type == BPF_PROG_TYPE_LSM)
+    {
+      // Extract hook name from section name "lsm/hook_name"
+      const char *hook_start = strchr(name, '/');
+      if (!hook_start)
+        fatal("LSM section name '%s' missing hook name\n", name);
+
+      std::string hook_name(hook_start + 1);
+      __s32 btf_id = lsm_hook_btf_id(hook_name);
+      if (btf_id < 0)
+        fatal("Failed to find BTF ID for LSM hook '%s'\n", hook_name.c_str());
+
+      // Load with BTF info
+      union bpf_attr attr;
+      int retry = 0;
+    lsm_retry:
+      memset(&attr, 0, sizeof(attr));
+      attr.prog_type = BPF_PROG_TYPE_LSM;
+      attr.insns = (__u64)(unsigned long)data->d_buf;
+      attr.insn_cnt = data->d_size / sizeof(bpf_insn);
+      attr.license = (__u64)(unsigned long)module_license;
+      attr.kern_version = kernel_version;
+      attr.expected_attach_type = BPF_LSM_MAC;
+      attr.attach_btf_id = btf_id;
+
+      // Set up logging - always use higher verbosity to get error details
+      if (verbose || retry)
+        {
+          attr.log_buf = (__u64)(unsigned long)bpf_log_buf;
+          attr.log_size = LOG_BUF_SIZE;
+          attr.log_level = retry ? verbose + 1 : verbose;
+        }
+
+      bpf_log_buf[0] = 0;
+      fd = syscall(__NR_bpf, BPF_PROG_LOAD, &attr, sizeof(attr));
+
+      // Retry with verbose logging on failure
+      if (fd < 0 && verbose == 0 && !retry)
+        {
+          retry = 1;
+          goto lsm_retry;
+        }
+    }
+  else
+#endif
+    fd = bpf_prog_load(prog_type, static_cast<bpf_insn *>(data->d_buf),
+                       data->d_size, module_license, kernel_version);
   if (fd < 0)
     {
       if (bpf_log_buf[0] != 0)
@@ -782,6 +887,41 @@ collect_raw_tracepoint(const char *name, unsigned name_idx, unsigned fd_idx)
     fatal("probe %u section %u not loaded\n", name_idx, fd_idx);
 
   raw_tracepoint_probes.push_back(trace_data(tp_system, tp_name, fd));
+}
+
+static void
+collect_lsm(const char *name, unsigned name_idx, unsigned fd_idx)
+{
+  char lsm_hook[512];
+
+  int res = snprintf(lsm_hook, sizeof(lsm_hook), "%s", name + 4); // skip "lsm/" prefix
+  if (res < 0 || res >= (int)sizeof(lsm_hook))
+    fatal("LSM hook name too long in probe %u section %u\n", name_idx, fd_idx);
+
+  int fd = -1;
+  if (fd_idx >= prog_fds.size() || (fd = prog_fds[fd_idx]) < 0)
+    fatal("probe %u section %u not loaded\n", name_idx, fd_idx);
+
+  lsm_probes.push_back(lsm_data(lsm_hook, fd));
+}
+
+static void
+collect_xdp(const char *name, unsigned name_idx, unsigned fd_idx)
+{
+  char ifaces[512];
+
+  // Section names look like "xdp/ifname[,ifname...]"; a bare "xdp" section
+  // (empty list) means attach to every up interface.
+  const char *list = (strncmp(name, "xdp/", 4) == 0) ? name + 4 : name + 3;
+  int res = snprintf(ifaces, sizeof(ifaces), "%s", list);
+  if (res < 0 || res >= (int)sizeof(ifaces))
+    fatal("iface list too long in probe %u section %u\n", name_idx, fd_idx);
+
+  int fd = -1;
+  if (fd_idx >= prog_fds.size() || (fd = prog_fds[fd_idx]) < 0)
+    fatal("probe %u section %u not loaded\n", name_idx, fd_idx);
+
+  xdp_probes.push_back(xdp_data(ifaces, fd));
 }
 
 static void
@@ -1241,10 +1381,263 @@ register_raw_tracepoints()
 }
 
 static void
+unregister_lsm_probes(const size_t nprobes)
+{
+  for (size_t i = 0; i < nprobes; ++i)
+    if (lsm_probes[i].link_fd >= 0)
+      close(lsm_probes[i].link_fd);
+}
+
+static void
+register_lsm_probes()
+{
+  size_t nprobes = lsm_probes.size();
+  if (nprobes == 0)
+    return;
+
+#ifndef HAVE_BPF_PROG_TYPE_LSM
+  fprintf(stderr, "BPF LSM probes unsupported on this kernel\n");
+  exit(1);
+#else
+#ifndef HAVE_LIBBPF
+  fprintf(stderr, "BPF LSM probes require libbpf for BTF support\n");
+  exit(1);
+#else
+  // Check if BPF LSM is enabled in the kernel
+  if (verbose >= 1)
+    {
+      int fd = open("/sys/kernel/security/lsm", O_RDONLY);
+      if (fd >= 0)
+        {
+          char lsm_list[512];
+          ssize_t len = read(fd, lsm_list, sizeof(lsm_list) - 1);
+          close(fd);
+          if (len > 0)
+            {
+              lsm_list[len] = '\0';
+              if (strstr(lsm_list, "bpf") == NULL)
+                fprintf(stderr, "Warning: BPF not found in active LSMs (%s)\n"
+                               "LSM hooks may not enforce return values.\n", lsm_list);
+            }
+        }
+    }
+
+  {
+    union bpf_attr attr;
+
+    for (size_t i = 0; i < nprobes; ++i)
+      {
+        lsm_data &l = lsm_probes[i];
+
+        // Look up BTF ID for the LSM hook
+        __s32 btf_id = lsm_hook_btf_id(l.hook_name);
+        if (btf_id < 0)
+          {
+            fprintf(stderr, "Failed to find BTF ID for LSM hook '%s'\n",
+                    l.hook_name.c_str());
+            goto fail;
+          }
+
+        memset(&attr, 0, sizeof(attr));
+        attr.link_create.prog_fd = l.prog_fd;
+        attr.link_create.attach_type = BPF_LSM_MAC;
+        // Note: target_btf_id was already set during program load,
+        // don't set it again here
+
+        int fd = syscall(__NR_bpf, BPF_LINK_CREATE, &attr, sizeof(attr));
+        if (fd < 0)
+          {
+            fprintf(stderr, "Error attaching LSM probe %s: %s\n",
+                    l.hook_name.c_str(), strerror(errno));
+            goto fail;
+          }
+        l.link_fd = fd;
+      }
+  }
+  return;
+
+ fail:
+  unregister_lsm_probes(nprobes);
+  exit(1);
+#endif
+#endif
+}
+
+static void
 unregister_timers(const size_t nprobes)
 {
   for (size_t i = 0; i < nprobes; ++i)
     close(timers[i].event_fd);
+}
+
+// Attach/detach an XDP program via rtnetlink (IFLA_XDP_FD). This is the
+// portable fallback for kernels that lack BPF_LINK_CREATE/BPF_XDP.
+static int
+xdp_rtnl_set(unsigned ifindex, int fd)
+{
+  char buf[256];
+  memset(buf, 0, sizeof(buf));
+
+  struct nlmsghdr *nlh = (struct nlmsghdr *)buf;
+  nlh->nlmsg_len = NLMSG_HDRLEN;
+  nlh->nlmsg_type = RTM_SETLINK;
+  nlh->nlmsg_flags = NLM_F_REQUEST;
+
+  struct ifinfomsg *ifi = (struct ifinfomsg *)NLMSG_DATA(nlh);
+  ifi->ifi_family = AF_UNSPEC;
+  ifi->ifi_index = (int)ifindex;
+  nlh->nlmsg_len = NLMSG_LENGTH(sizeof(*ifi));
+
+  // Nested IFLA_XDP { IFLA_XDP_FD } attributes.
+  struct rtattr *xds = (struct rtattr *)((char *)nlh
+                                         + NLMSG_ALIGN(nlh->nlmsg_len));
+  char *p = (char *)xds + RTA_ALIGN(sizeof(struct rtattr));
+  struct rtattr *rta = (struct rtattr *)p;
+  int fdval = fd;
+  rta->rta_type = IFLA_XDP_FD;
+  rta->rta_len = RTA_LENGTH(sizeof(fdval));
+  memcpy(RTA_DATA(rta), &fdval, sizeof(fdval));
+  p += RTA_ALIGN(RTA_LENGTH(sizeof(fdval)));
+  xds->rta_type = IFLA_XDP;
+  xds->rta_len = (unsigned short)(p - (char *)xds);
+  nlh->nlmsg_len += RTA_ALIGN(xds->rta_len);
+
+  struct sockaddr_nl sa;
+  memset(&sa, 0, sizeof(sa));
+  sa.nl_family = AF_NETLINK;
+
+  int sock = socket(AF_NETLINK, SOCK_RAW | SOCK_CLOEXEC, NETLINK_ROUTE);
+  if (sock < 0)
+    return -errno;
+
+  if (sendto(sock, buf, nlh->nlmsg_len, MSG_DONTWAIT,
+             (struct sockaddr *)&sa, sizeof(sa)) < 0)
+    {
+      int err = errno;
+      close(sock);
+      return -err;
+    }
+
+  // Drain the ack; an NLMSG_ERROR carries the real status.
+  char ack[256];
+  ssize_t n = recv(sock, ack, sizeof(ack), MSG_DONTWAIT);
+  close(sock);
+  if (n <= 0)
+    return 0;
+
+  struct nlmsghdr *ah = (struct nlmsghdr *)ack;
+  if (ah->nlmsg_type == NLMSG_ERROR)
+    return ((struct nlmsgerr *)NLMSG_DATA(ah))->error;
+  return 0;
+}
+
+static void
+unregister_xdp_probes(const size_t nprobes)
+{
+  for (size_t i = 0; i < nprobes; ++i)
+    {
+      xdp_data &x = xdp_probes[i];
+      for (size_t j = 0; j < x.link_fds.size(); ++j)
+        if (x.link_fds[j] >= 0)
+          close(x.link_fds[j]);
+      x.link_fds.clear();
+      for (size_t j = 0; j < x.rt_ifs.size(); ++j)
+        xdp_rtnl_set(x.rt_ifs[j], -1);
+      x.rt_ifs.clear();
+    }
+}
+
+static void
+register_xdp_probes()
+{
+  size_t nprobes = xdp_probes.size();
+  if (nprobes == 0)
+    return;
+
+#ifndef HAVE_BPF_PROG_TYPE_XDP
+  fprintf(stderr, "XDP probes unsupported on this kernel\n");
+  exit(1);
+#else
+  std::string failed_ifaces;
+
+  for (size_t i = 0; i < nprobes; ++i)
+    {
+      xdp_data &x = xdp_probes[i];
+
+      // Resolve the target interfaces: named list, or enumerate them all.
+      std::vector<std::string> names;
+      std::istringstream ifs(x.ifaces);
+      std::string name;
+      while (std::getline(ifs, name, ','))
+        if (!name.empty())
+          names.push_back(name);
+      if (names.empty())
+        {
+          struct if_nameindex *all = if_nameindex();
+          if (all == NULL)
+            fatal("error enumerating interfaces for XDP probe %zu: %s\n",
+                  i + 1, strerror(errno));
+          for (struct if_nameindex *ni = all; ni->if_index != 0 || ni->if_name != NULL; ni++)
+            names.push_back(ni->if_name);
+          if_freenameindex(all);
+        }
+
+      size_t attached = 0;
+      for (size_t j = 0; j < names.size(); ++j)
+        {
+          unsigned ifindex = if_nametoindex(names[j].c_str());
+          if (ifindex == 0)
+            {
+              fprintf(stderr, "Warning: XDP interface '%s' not found (%s)\n",
+                      names[j].c_str(), strerror(errno));
+              if (!failed_ifaces.empty())
+                failed_ifaces += ",";
+              failed_ifaces += names[j];
+              continue;
+            }
+
+          // Preferred: bounded BPF link (kernel 5.9+).
+          union bpf_attr attr;
+          memset(&attr, 0, sizeof(attr));
+          attr.link_create.prog_fd = x.prog_fd;
+          attr.link_create.attach_type = BPF_XDP;
+          attr.link_create.target_ifindex = ifindex;
+          int fd = syscall(__NR_bpf, BPF_LINK_CREATE, &attr, sizeof(attr));
+          if (fd >= 0)
+            {
+              x.link_fds.push_back(fd);
+              attached++;
+              continue;
+            }
+
+          // Older kernels: set the fd via rtnetlink instead.
+          if (xdp_rtnl_set(ifindex, x.prog_fd) == 0)
+            {
+              x.rt_ifs.push_back(ifindex);
+              attached++;
+              continue;
+            }
+
+          fprintf(stderr, "Error attaching XDP probe to '%s': %s\n",
+                  names[j].c_str(), strerror(errno));
+          if (!failed_ifaces.empty())
+            failed_ifaces += ",";
+          failed_ifaces += names[j];
+        }
+
+      if (attached == 0 && !names.empty())
+        goto fail;
+    }
+
+  if (!failed_ifaces.empty())
+    fprintf(stderr, "Warning: some interfaces missing for XDP probes (%s)\n",
+            failed_ifaces.c_str());
+  return;
+
+ fail:
+  unregister_xdp_probes(nprobes);
+  exit(1);
+#endif
 }
 
 static void
@@ -1424,6 +1817,8 @@ load_bpf_file(const char *module)
 
   /* Extract basename: */
   char *buf = (char *)malloc(BPF_MAXSTRINGLEN * sizeof(char));
+  if (!buf)
+    fatal("Out of memory allocating module basename\n");
   // NB: If module doesn't contain a single '/', then the behaviour
   // of rfind (-1) and substr (-1 + 1) will default to module_str.
   string module_basename_str
@@ -1434,6 +1829,8 @@ load_bpf_file(const char *module)
 
   /* Extract name: */
   buf = (char*) malloc(BPF_MAXSTRINGLEN * sizeof(char));
+  if (!buf)
+    fatal("Out of memory allocating module name\n");
   string suffix = ".bo";
   string module_name_str
     = module_basename_str.substr(0, module_basename_str.rfind(suffix)); // name
@@ -1757,6 +2154,10 @@ load_bpf_file(const char *module)
       collect_tracepoint(sh_name[i], i, i);
     if (strncmp(sh_name[i], "raw_trace", 9) == 0)
       collect_raw_tracepoint(sh_name[i], i, i);
+    if (strncmp(sh_name[i], "lsm", 3) == 0)
+      collect_lsm(sh_name[i], i, i);
+    if (strncmp(sh_name[i], "xdp", 3) == 0)
+      collect_xdp(sh_name[i], i, i);
     if (strncmp(sh_name[i], "perf", 4) == 0)
       collect_perf(sh_name[i], i, i);
     if (strncmp(sh_name[i], "timer", 5) == 0)
@@ -1852,10 +2253,12 @@ perf_event_loop(pthread_t main_thread)
     = map_attrs[bpf::globals::perf_event_map_idx].max_entries;
   unsigned n_active_cpus
     = count_active_cpus();
-  if (n_active_cpus > (size_t)-1 / sizeof(struct pollfd))
+  if (n_active_cpus > (unsigned)-1 / sizeof(struct pollfd))
     fatal("Too many active CPUs for pollfd allocation\n");
   struct pollfd *pmu_fds
     = (struct pollfd *)malloc(n_active_cpus * sizeof(struct pollfd));
+  if (n_active_cpus && !pmu_fds)
+    fatal("Out of memory allocating pollfd array\n");
   vector<unsigned> cpuids;
 
   assert(ncpus == perf_fds.size());
@@ -2215,7 +2618,7 @@ main(int argc, char **argv)
 
       case 'V':
         printf("Systemtap BPF loader/runner (version %s, %s)\n"
-               "Copyright (C) 2016-2025 Red Hat, Inc. and others\n" // PRERELEASE
+               "Copyright (C) 2016-2026 Red Hat, Inc. and others\n" // PRERELEASE
                "This is free software; "
                "see the source for copying conditions.\n",
                VERSION, STAP_EXTENDED_VERSION);
@@ -2266,6 +2669,8 @@ main(int argc, char **argv)
   register_timers();
   register_tracepoints();
   register_raw_tracepoints();
+  register_lsm_probes();
+  register_xdp_probes();
   register_perf();
 
   // Run the begin probes.
@@ -2323,6 +2728,8 @@ main(int argc, char **argv)
   unregister_perf(perf_probes.size());
   unregister_tracepoints(tracepoint_probes.size());
   unregister_raw_tracepoints(raw_tracepoint_probes.size());
+  unregister_lsm_probes(lsm_probes.size());
+  unregister_xdp_probes(xdp_probes.size());
 
   // Clean procfs-like probe files.
   procfs_cleanup();

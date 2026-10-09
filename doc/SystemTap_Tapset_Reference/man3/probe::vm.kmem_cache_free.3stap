@@ -2,12 +2,12 @@
 .\"     Title: probe::vm.kmem_cache_free
 .\"    Author: 
 .\" Generator: DocBook XSL Stylesheets vsnapshot <http://docbook.sf.net/>
-.\"      Date: October 2025
+.\"      Date: September 2026
 .\"    Manual: Memory Tapset
-.\"    Source: SystemTap Tapset Reference
+.\"    Source: SystemTap Tapset Reference Version 5.6
 .\"  Language: English
 .\"
-.TH "PROBE::VM\&.KMEM_CAC" "3stap" "October 2025" "SystemTap Tapset Reference" "Memory Tapset"
+.TH "PROBE::VM\&.KMEM_CAC" "3stap" "September 2026" "SystemTap Tapset Reference Ver" "Memory Tapset"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -32,7 +32,7 @@ probe::vm.kmem_cache_free \- Fires when kmem_cache_free is requested
 .SH "SYNOPSIS"
 .sp
 .nf
-vm\&.kmem_cache_free 
+probe vm\&.kmem_cache_free {}
 .fi
 .SH "VALUES"
 .PP
@@ -46,14 +46,14 @@ Pointer to the kmemory allocated which is returned by kmem_cache
 Name of the caller function\&.
 .RE
 .PP
-\fIname\fR
-.RS 4
-Name of the probe point
-.RE
-.PP
 \fIcall_site\fR
 .RS 4
 Address of the function calling this kmemory function
+.RE
+.PP
+\fIname\fR
+.RS 4
+Name of the probe point
 .RE
 .SH SEE ALSO\n 
 .IR tapset::memory (3stap)

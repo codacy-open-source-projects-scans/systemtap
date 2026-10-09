@@ -44,14 +44,35 @@ int stp_tracepoint_probe_register(const char *name, void *probe, void *data);
 int stp_tracepoint_probe_unregister(const char *name, void *probe, void *data);
 
 /* Type-checked wrappers to make sure the fn signature is correct.  */
-#define STP_TRACE_REGISTER(name, fn) ({				\
-    check_trace_callback_type_##name(fn);			\
+#ifdef STAPCONF_TRACEPOINT_TYPECHECK
+/*
+ * STP_TRACE_REGISTER2(name, tc, fn): register under #name and typecheck with
+ * check_trace_callback_type_##tc.  Callers pass the kernel's own name for the
+ * tracepoint in both slots; for DECLARE_TRACE() hooks on kernel 6.16+ that
+ * name itself carries the _tp suffix (pelt_cfs_tp).
+ */
+#define STP_TRACE_REGISTER2(name, tc, fn) ({			\
+    check_trace_callback_type_##tc(fn);				\
     stp_tracepoint_probe_register(#name, (void*)fn, NULL);	\
     })
-#define STP_TRACE_UNREGISTER(name, fn) ({			\
-    check_trace_callback_type_##name(fn);			\
+#define STP_TRACE_UNREGISTER2(name, tc, fn) ({			\
+    check_trace_callback_type_##tc(fn);				\
     stp_tracepoint_probe_unregister(#name, (void*)fn, NULL);	\
     })
+#define STP_TRACE_REGISTER(name, fn) \
+    STP_TRACE_REGISTER2(name, name, fn)
+#define STP_TRACE_UNREGISTER(name, fn) \
+    STP_TRACE_UNREGISTER2(name, name, fn)
+#else
+#define STP_TRACE_REGISTER2(name, tc, fn) \
+    stp_tracepoint_probe_register(#name, (void*)fn, NULL)
+#define STP_TRACE_UNREGISTER2(name, tc, fn) \
+    stp_tracepoint_probe_unregister(#name, (void*)fn, NULL)
+#define STP_TRACE_REGISTER(name, fn) \
+    STP_TRACE_REGISTER2(name, name, fn)
+#define STP_TRACE_UNREGISTER(name, fn) \
+    STP_TRACE_UNREGISTER2(name, name, fn)
+#endif
 
 #endif /* STAPCONF_TRACEPOINT_STRINGS */
 

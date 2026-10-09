@@ -481,6 +481,16 @@ same convenience variables.
     filedes, name_str, name_str_unquoted, size, value_uaddr
 </entry></row>
 <row><entry>
+    file_getattr
+</entry><entry>
+    at_flags, dfd, dfd_str, dfd_str_unquoted, filename, filename_str, filename_str_unquoted, ufattr, usize
+</entry></row>
+<row><entry>
+    file_setattr
+</entry><entry>
+    at_flags, dfd, dfd_str, dfd_str_unquoted, filename, filename_str, filename_str_unquoted, ufattr, usize
+</entry></row>
+<row><entry>
     finit_module
 </entry><entry>
     fd, flags, flags_str, uargs, uargs_unquoted
@@ -859,6 +869,16 @@ same convenience variables.
     lsetxattr
 </entry><entry>
     flags, flags_str, name_str, name_str_unquoted, name_uaddr, path, path_uaddr, path_unquoted, size, value_str, value_uaddr
+</entry></row>
+<row><entry>
+    lsm_get_self_attr
+</entry><entry>
+    $id, $regs, attr, ctx, flags, int, pt_regs*, size
+</entry></row>
+<row><entry>
+    lsm_set_self_attr
+</entry><entry>
+    $id, $regs, attr, ctx, flags, int, pt_regs*, size
 </entry></row>
 <row><entry>
     lstat

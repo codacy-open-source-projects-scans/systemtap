@@ -8,7 +8,21 @@ load_lib "server_ns.exp"
 if { [info procs saved_record_test] == "" } {
     rename record_test saved_record_test
     proc record_test { type message args } {
-        send_log "TIMESTAMP_MS: [clock milliseconds]\n"
+        # Let the DMESG expect_background soak up all pent-up input
+        global dmesg_spawn_id last_heartbeat_ms
+        if {[info exists dmesg_spawn_id]} {
+            if {$dmesg_spawn_id != ""} {
+                expect -i $dmesg_spawn_id -timeout 0
+            }
+        }
+
+        set now [clock milliseconds]
+        if {! [info exists last_heartbeat_ms] || [expr {$now - $last_heartbeat_ms}] > 60000} {
+            clone_output "HEARTBEAT_MS: $now"
+            set last_heartbeat_ms $now
+        }
+
+        send_log "TIMESTAMP_MS: $now\n"
         eval [list saved_record_test $type $message] $args
     }
 }
@@ -26,6 +40,86 @@ proc installtest_p {} {
     } else { return 0 }
 }
 
+# Wave-3 prune: early systemtap.base language microtests that are
+# subsumed by buildok/semok, systemtap.printf/, systemtap.maps/, and
+# larger base drivers (alias_suffixes, cast-scope, etc.). Default skip
+# during installcheck/check; restore with BASE_MICROTESTS_FULL=1.
+#
+# Optional NAME is an .exp stem (e.g. "add"); defaults to the sourcing
+# script's basename.
+proc base_microtest_skip_p {{name ""}} {
+    global env _base_microtest_skip
+    if {[info exists env(BASE_MICROTESTS_FULL)] \
+	    && $env(BASE_MICROTESTS_FULL) != "" \
+	    && $env(BASE_MICROTESTS_FULL) != "0"} {
+	return 0
+    }
+    if {$name == ""} {
+	set name [file rootname [file tail [info script]]]
+    } else {
+	set name [file rootname [file tail $name]]
+    }
+    if {![info exists _base_microtest_skip]} {
+	set _base_microtest_skip {
+	    add arith if not logical_and tri equal inc
+	    print simple array_size array_string global_init global_vars
+	    var_scope alias-condition alias-epilog alias-prolog be_order
+	    deref optim_voidstmt pointer_array cast bitfield bitfield2
+	    break_and_continue finloop2 poll_map error_fn kfunct
+	    optionalprobe rand timeout const_value preprocessor
+	    try_assign func_definition const_op cmdline
+	    be_loaded
+	}
+    }
+    return [expr {[lsearch -exact $_base_microtest_skip $name] >= 0}]
+}
+
+# Return sorted .stp files matching glob pattern(s), optionally filtered
+# by CHECK_ONLY (basename without .stp, as in buildok/nfs-detailed.stp).
+proc pass14_stap_files { args } {
+    global env
+    set all_files [lsort [eval glob -nocomplain $args]]
+    if {![info exists env(CHECK_ONLY)]} {
+        return $all_files
+    }
+    set filtered {}
+    foreach name $env(CHECK_ONLY) {
+        set base [file tail $name]
+        if {[string match *.stp $base]} {
+            set base [file rootname $base]
+        }
+        foreach file $all_files {
+            if {[string equal $base [file rootname [file tail $file]]]} {
+                lappend filtered $file
+            }
+        }
+    }
+    return [lsort -unique $filtered]
+}
+
+proc get_original_user {} {
+    global env
+    if {[info exists env(SUDO_USER)]} {
+        return $env(SUDO_USER)
+    }
+    # Fallback to the owner of the current directory (the build tree)
+    set owner [file attributes . -owner]
+    if {$owner != "root"} {
+        return $owner
+    }
+    return ""
+}
+
+proc chown_to_original_user {args} {
+    set user [get_original_user]
+    if {$user != ""} {
+        foreach path $args {
+            if {[file exists $path]} {
+                catch {exec chown -R $user $path}
+            }
+        }
+    }
+}
 
 proc grep_kallsyms { pattern } {
     if {! [catch {exec grep -q "$pattern" "/proc/kallsyms"} dummy]} {
@@ -139,11 +233,6 @@ proc nss_p {} {
 proc java_p {} {
     global systemtap_java_p
     return $systemtap_java_p
-}
-
-proc python2_p {} {
-    global systemtap_python2_p
-    return $systemtap_python2_p
 }
 
 proc python3_p {} {
@@ -287,9 +376,15 @@ proc systemtap_check_users {} {
 proc setup_systemtap_environment {} {
     global srcdir env server_pid systemtap_dyninst_p
     global systemtap_nss_p systemtap_java_p
-    global systemtap_python2_p systemtap_python3_p
+    global systemtap_python3_p
     global have_hw_breakpoint_p systemtap_readline_p
     global kill_needs_doubledash
+
+    # If this is an installcheck (run as root), redirect the debuginfod
+    # cache to /root to avoid polluting the user's $HOME.
+    if {[installtest_p] && ![catch {exec test -w /root}]} {
+        set env(DEBUGINFOD_CACHE_PATH) /root/.cache/debuginfod_client
+    }
 
     # need an absolute SRCDIR for the top-level src/ tree
     # XXX: or, we could change nearby uses of ${SRCDIR}/testsuite to ${SRCDIR}
@@ -358,14 +453,6 @@ proc setup_systemtap_environment {} {
         set systemtap_java_p 1
     } else {
         set systemtap_java_p 0
-    }
-
-    # Remember if this selfsame version of systemtap compiled with
-    # python2 support
-    if {! [catch {exec sh -c "stap -V 2>&1 | grep -q PYTHON2"} dummy]} {
-        set systemtap_python2_p 1
-    } else {
-        set systemtap_python2_p 0
     }
 
     # Remember if this selfsame version of systemtap compiled with
@@ -666,10 +753,10 @@ proc get_system_info {} {
 
 proc environment_sanity_test {} {
     # PR11798: die if kernel-devel is not sufficient to build any modules
-    # Run this with --poison-cache and --vp 0005 tracing so the runtime/autoconf-*
-    # compilation attempts are captured in the logs.
+    # Run this with --poison-cache and --vp 1335 so pass-1..4 tracing (incl.
+    # runtime/autoconf-* compile noise at pass 4) is captured in the logs.
     verbose -log "systemtap kernel-devel smoke test"
-    if {[catch {exec stap --poison-cache --vp 0005 -p4 -e {probe begin {exit()}} 2>@ stdout} result]} {
+    if {[catch {exec stap --poison-cache --vp 1335 -p4 -e {probe begin {exit()}} 2>@ stdout} result]} {
         puts "\n\n\n**** failed systemtap kernel-devel smoke test:\n"
         verbose -log "$result"
     #    puts "****\n"
@@ -688,15 +775,20 @@ proc environment_sanity_test {} {
     # it is allowed have bad var location descriptors (which will cause
     # some tests to fail of course). Just test -p2, kernel-devel smoke
     # test above does a full module build, we don't need another one.
-    if {[catch {exec stap --skip-badvars -w -p2 -e {probe kernel.function("do_exit") {println ($code)}} 2>@ stdout} result]} {
+    # Same --vp 1335 as above: pass-2 verbosity 3 surfaces build-id / dwfl /
+    # debuginfod diagnostics (the old --vp 0005 never reached those passes).
+    verbose -log "systemtap kernel-debuginfo smoke test"
+    if {[catch {exec stap --skip-badvars -w --vp 1335 -p2 -e {probe kernel.function("do_exit") {println ($code)}} 2>@ stdout} result]} {
         puts "\n\n\n**** failed systemtap kernel-debuginfo smoke test:\n"
         puts $result
+        verbose -log "$result"
     #    puts "****\n"
     #    puts $options
         puts "\n**** aborting testing.\n"
         cleanup
         exit 1
     }
+    verbose -log "$result"
 
     # Create a tempory directory.
     if {[catch {exec mktemp -d} tmpdir]} {
@@ -757,20 +849,21 @@ proc setup_dmesg_monitor {} {
         return
     }
     # Check if dmesg supports -W option
+    # Prefix DMESG: and omit the timestamp stuff.  The prefix is self-identifying enough.
     if {[catch {exec dmesg --help | grep -q -- "-W"} err] == 0} {
-        set cmd "dmesg -W"
+        set cmd {sh -c "dmesg -t -W | sed -u 's/^/DMESG: /'"}
     } else {
         exec dmesg --clear
-        set cmd "dmesg -w"
+        set cmd {sh -c "dmesg -t -w | sed -u 's/^/DMESG: /'"}
     }
     eval spawn -noecho $cmd
     # NB: dmesg will die automatically with SIGPIPE when dejagnu/expect exit
     set dmesg_spawn_id $spawn_id
+    # turn off input side buffering as much as possible
+    fconfigure $dmesg_spawn_id -buffering none -blocking 0
     expect_background {
         -i $dmesg_spawn_id
-        -re "(\[^\r\n]*\r?\n)" {
-            exp_continue
-        }
+        -re ".*" { exp_continue }
     }
 }
 
@@ -962,41 +1055,77 @@ proc prelink { FILE ADDR } {
   return 1
 }
 
+# True if PID (or process group -$pgid) still has a live, non-zombie target.
+# Process groups: kill -0 the group (leader may be gone while members remain).
+# Single pids: /proc + zombie check.
+proc kill_still_alive { PID {AS_ROOT 0} } {
+   global kill_needs_doubledash
+
+   if {[regexp {^-([0-9]+)$} $PID]} {
+      set kill_pid $PID
+      if {$kill_needs_doubledash} {
+	 set kill_pid "-- $PID"
+      }
+      if {$AS_ROOT != 0} {
+	 # String form so "-- -$pgid" word-splits under eval exec
+	 if {[as_root "kill -0 $kill_pid"] != 0} {
+	    return 0
+	 }
+	 return 1
+      }
+      # ESRCH / "No such process" => group empty; EPERM etc. => still alive
+      if {[catch {eval exec kill -0 $kill_pid} err]} {
+	 if {[string match -nocase "*No such process*" $err]} {
+	    return 0
+	 }
+	 return 1
+      }
+      return 1
+   }
+
+   if {![file isdirectory /proc/$PID]} { return 0 }
+   if {[catch {exec cat /proc/$PID/stat} statout] == 0} {
+      # The 3rd field in /proc/<pid>/stat is the state (e.g., 'Z' for Zombie)
+      if {[lindex [split $statout] 2] eq "Z"} { return 0 }
+   }
+   return 1
+}
+
 # Send signal SIG to PID. If KILL_TIMEOUT > 0, waits KILL_TIMEOUT
 # seconds before also sending a SIGKILL signal to PID. SIG can be with
 # or without leading '-'. If AS_ROOT isn't 0, send the signal as root.
+# PID may be a process-group id (-pgid).
 proc kill { SIG PID {KILL_TIMEOUT 0} {AS_ROOT 0} } {
    global kill_needs_doubledash
 
+   set kill_arg $PID
    if {$kill_needs_doubledash} {
-      set PID "-- $PID"
+      set kill_arg "-- $PID"
    }
    if {![string match -* $SIG]} {
       set SIG "-$SIG"
    }
 
    if {$AS_ROOT != 0} {
-      as_root [list kill $SIG $PID]
+      as_root [list kill $SIG $kill_arg]
    } else {
-      verbose -log "Executing: kill $SIG $PID"
-      if {[catch {eval exec kill $SIG $PID} killout]} {
+      verbose -log "Executing: kill $SIG $kill_arg"
+      if {[catch {eval exec kill $SIG $kill_arg} killout]} {
 	 verbose -log "kill: $killout"
       }
    }
 
    if {$KILL_TIMEOUT > 0} {
       while {$KILL_TIMEOUT > 0} {
-         if {![file isdirectory /proc/$PID]} {
-            return
-         }
-         sleep 1
-         incr KILL_TIMEOUT -1
+	 if {![kill_still_alive $PID $AS_ROOT]} { return }
+	 sleep 1
+	 incr KILL_TIMEOUT -1
       }
       if {$AS_ROOT != 0} {
-	 as_root [list kill -KILL $PID]
+	 as_root [list kill -KILL $kill_arg]
       } else {
-	 verbose -log "Executing: kill -KILL $PID"
-	 if {[catch {eval exec kill -KILL $PID} killout]} {
+	 verbose -log "Executing: kill -KILL $kill_arg"
+	 if {[catch {eval exec kill -KILL $kill_arg} killout]} {
 	    verbose -log "kill: $killout"
 	 }
       }

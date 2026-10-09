@@ -60,18 +60,18 @@ proc dyninst_kfails {test} {
 	semok/umask07.stp -
 	semok/vfs_add_to_page_cache.stp -
 	semok/xfslines.stp {
-	    # Use setup_kfail DYNINST <target triplet> for known
+	    # Use setup_xfail DYNINST <target triplet> for expected
 	    # failures when running with the dyninst runtime (scripts
 	    # that use kernel features or kernel-only tapset
 	    # functions).
-	    setup_kfail DYNINST *-*-*
+	    setup_xfail DYNINST *-*-*
 	}
 
 	semok/thirtysix-utrace.stp {
-	    # Use setup_kfail 14708 <target triplet> for known
+	    # Use setup_xfail 14708 <target triplet> for expected
 	    # failures when running with the dyninst runtime (scripts
 	    # that use utrace-like probes)
-	    setup_kfail 14708 *-*-*
+	    setup_xfail 14708 *-*-*
 	}
 
 	semok/plt1.stp -
@@ -98,7 +98,7 @@ set utrace_p [utrace_p]
 set plt_probes_p [plt_probes_p]
 set effective_uid [exec /usr/bin/id -u]
 foreach runtime [get_runtime_list] {
-    foreach file [lsort [glob -nocomplain $srcdir/$self/*.stp]] {
+    foreach file [pass14_stap_files $srcdir/$self/*.stp] {
 	set test $self/[file tail $file]
 	if {$runtime != ""} {
 	    verbose -log "Running $file ($runtime)"

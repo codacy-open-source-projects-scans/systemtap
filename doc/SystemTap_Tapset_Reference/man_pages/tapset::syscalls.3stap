@@ -1,5 +1,5 @@
 ." -*- nroff -*-
-.TH TAPSET::SYSCALLS 3stap "October 2025" "Systemtap Tapset Reference"
+.TH TAPSET::SYSCALLS 3stap "September 2026" "Systemtap Tapset Reference"
 .SH NAME
 tapset::syscalls - systemtap syscall tapset
 
@@ -382,6 +382,14 @@ fd
 filedes, name_str, name_str_unquoted, size, value_uaddr
 .P
 .TP
+.B syscall.file_getattr
+at_flags, dfd, dfd_str, dfd_str_unquoted, filename, filename_str, filename_str_unquoted, ufattr, usize
+.P
+.TP
+.B syscall.file_setattr
+at_flags, dfd, dfd_str, dfd_str_unquoted, filename, filename_str, filename_str_unquoted, ufattr, usize
+.P
+.TP
 .B syscall.finit_module
 fd, flags, flags_str, uargs, uargs_unquoted
 .P
@@ -684,6 +692,14 @@ fildes, offset, whence, whence_str
 .TP
 .B syscall.lsetxattr
 flags, flags_str, name_str, name_str_unquoted, name_uaddr, path, path_uaddr, path_unquoted, size, value_str, value_uaddr
+.P
+.TP
+.B syscall.lsm_get_self_attr
+$id, $regs, attr, ctx, flags, int, pt_regs*, size
+.P
+.TP
+.B syscall.lsm_set_self_attr
+$id, $regs, attr, ctx, flags, int, pt_regs*, size
 .P
 .TP
 .B syscall.lstat

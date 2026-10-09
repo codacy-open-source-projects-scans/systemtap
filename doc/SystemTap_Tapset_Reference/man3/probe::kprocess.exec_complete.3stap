@@ -2,12 +2,12 @@
 .\"     Title: probe::kprocess.exec_complete
 .\"    Author: 
 .\" Generator: DocBook XSL Stylesheets vsnapshot <http://docbook.sf.net/>
-.\"      Date: October 2025
+.\"      Date: September 2026
 .\"    Manual: Kernel Process Tapset
-.\"    Source: SystemTap Tapset Reference
+.\"    Source: SystemTap Tapset Reference Version 5.6
 .\"  Language: English
 .\"
-.TH "PROBE::KPROCESS\&.EX" "3stap" "October 2025" "SystemTap Tapset Reference" "Kernel Process Tapset"
+.TH "PROBE::KPROCESS\&.EX" "3stap" "September 2026" "SystemTap Tapset Reference Ver" "Kernel Process Tapset"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -32,18 +32,18 @@ probe::kprocess.exec_complete \- Return from exec to a new program
 .SH "SYNOPSIS"
 .sp
 .nf
-kprocess\&.exec_complete 
+probe kprocess\&.exec_complete {}
 .fi
 .SH "VALUES"
-.PP
-\fIname\fR
-.RS 4
-Name of the system call (\(lqexecve\(rq) (SystemTap v2\&.5+)
-.RE
 .PP
 \fIretstr\fR
 .RS 4
 A string representation of errno (SystemTap v2\&.5+)
+.RE
+.PP
+\fIname\fR
+.RS 4
+Name of the system call (\(lqexecve\(rq) (SystemTap v2\&.5+)
 .RE
 .PP
 \fIerrno\fR

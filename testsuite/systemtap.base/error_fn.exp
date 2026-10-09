@@ -1,3 +1,9 @@
+# Wave-3: early language microtest; skip unless BASE_MICROTESTS_FULL=1.
+if {[base_microtest_skip_p]} {
+    untested "[file rootname [file tail [info script]]] (base microtest; set BASE_MICROTESTS_FULL=1)"
+    return
+}
+
 # check that errors in nested functions are not lost on return
 # bugzilla 6529
 
@@ -5,10 +11,10 @@ set test "error_fn"
 
 foreach runtime [get_runtime_list] {
     if {$runtime != ""} {
-	stap_run $test no_load "ERROR: synthetic error\r\n" \
+	stap_run $test no_load "ERROR: synthetic error.*" \
 	    --runtime=$runtime $srcdir/$subdir/$test.stp
     } else {
-	stap_run $test no_load "ERROR: synthetic error\r\n" $srcdir/$subdir/$test.stp
+	stap_run $test no_load "ERROR: synthetic error.*" $srcdir/$subdir/$test.stp
     }
 }
 

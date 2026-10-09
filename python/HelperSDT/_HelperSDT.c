@@ -11,12 +11,13 @@
 #include <stdlib.h>
 
 
-// PR25841: ensure that the libHelperSDT.so file contains debuginfo
-// for the tapset helper functions, so they don't have to look into libpython*
+// We pull in some public Python headers (with -g) so the helper .so carries
+// DWARF for common types. For deep internals (_PyInterpreterFrame etc.) we
+// now rely on the target libpython's own DWARF (see tapset comments).
 #include <frameobject.h>
 // python 3.11 removed direct access to PyFrameObject members
 // https://docs.python.org/3.11/whatsnew/3.11.html#c-api-changes
-#if PY_MAJOR_VERSION <= 3 && PY_MINOR_VERSION < 11
+#if PY_MINOR_VERSION < 11
 PyFrameObject _dummy_frame;
 #else
 PyFrameObject *_dummy_frame;
@@ -32,26 +33,21 @@ PyTupleObject _dummy_tuple;
 #include <unicodeobject.h>
 PyUnicodeObject _dummy_unicode;
 
-#if PY_MAJOR_VERSION < 3
-
-#include <stringobject.h>
-PyStringObject _dummy_string;
-#include <classobject.h>
-PyClassObject _dummy_class;
-PyDictEntry _dummy_dictentry;
-PyInstanceObject _dummy_instance;
-#include <intobject.h>
-PyIntObject _dummy_int;
-
-#else
-
 PyASCIIObject _dummy_ascii;
 PyCompactUnicodeObject _dummy_compactunicode;
 // PyStringObject _dummy_string;
 #include <bytesobject.h>
 PyBytesObject _dummy_bytes;
 #include <longobject.h>
+#if PY_MINOR_VERSION >= 11
+#include <cpython/longintrepr.h>
+#else
+#include <longintrepr.h>
+#endif
 PyLongObject _dummy_long;
+// Ensure PyCodeObject debuginfo is available (defined via Python.h on all
+// supported versions; do not include cpython/code.h directly on 3.9/3.10).
+PyCodeObject _dummy_code_obj;
 
 /* This is internal to libpython. */
 #if PY_MINOR_VERSION == 6  /* python 3.6 */
@@ -108,7 +104,7 @@ struct _dictkeysobject {
   char dk_indices[];  /* char is required to avoid strict aliasing. */
 };
 
-#elif PY_MINOR_VERSION == 11  /* python 3.11 */
+#elif PY_MINOR_VERSION >= 11  /* python 3.11+ */
 /*
  * PyDictObject [...,PyDictKeysObject ma_keys,...]
  * PyDictKeysObject [..,dk_log2_size,dk_kind,...]
@@ -149,59 +145,24 @@ struct _dictvalues {
 
 #include <stdbool.h>
 #include <stddef.h>
-#include <python3.11/Python.h>
 
-// Redacted Python-3.11.0b3/Include/internal/pycore_frame.h
+// We no longer define synthetic _stp_* copies of Python internal structs here.
+// Instead, the tapset uses @cast(..., "RealInternalType", "/usr/lib64/libpython3.NN.so")
+// (or just the type name inside a python process probe context) to get the layout
+// directly from the target libpython's DWARF. This gives an exact match for the
+// probed python's internals without hand-maintained duplicates.
+//
+// The helper .so is still required for the SDT markers themselves.
 
-struct _stp_frame {
-    PyObject_HEAD
-    struct _frame *f_back;      /* previous frame, or NULL */
-    struct _stp_Py3InterpreterFrame *f_frame; /* points to the frame data */
-    PyObject *f_trace;          /* Trace function */
-    int f_lineno;               /* Current line number. Only valid if non-zero */
-    char f_trace_lines;         /* Emit per-line trace events? */
-    char f_trace_opcodes;       /* Emit per-opcode trace events? */
-    char f_fast_as_locals;      /* Have the fast locals of this frame been converted to a dict? */
-    /* The frame data, if this frame object owns the frame */
-    PyObject *_f_frame_data[1];
-};
+// Public PyDictValues dummy kept in case some tapset code still casts to it
+// for older compatibility. Internal header structs are no longer duplicated here.
+PyDictValues _dummy_dictvalues;
 
-typedef struct _stp_frame _stp_Py3FrameObject;
-_stp_Py3FrameObject _dummy_stp_Py3FrameObject;
-
-struct _stp_Py3InterpreterFrame {
-    /* "Specials" section */
-    void /*PyFunctionObject*/ *f_func; /* Strong reference */
-    PyObject *f_globals; /* Borrowed reference */
-    PyObject *f_builtins; /* Borrowed reference */
-    PyObject *f_locals; /* Strong reference, may be NULL */
-    PyCodeObject *f_code; /* Strong reference */
-    void /*PyFrameObject*/ *frame_obj; /* Strong reference, may be NULL */
-    /* Linkage section */
-    struct _stp_Py3InterpreterFrame *previous;
-    // NOTE: This is not necessarily the last instruction started in the given
-    // frame. Rather, it is the code unit *prior to* the *next* instruction. For
-    // example, it may be an inline CACHE entry, an instruction we just jumped
-    // over, or (in the case of a newly-created frame) a totally invalid value:
-    void /*_Py_CODEUNIT*/ *prev_instr;
-    int stacktop;     /* Offset of TOS from localsplus  */
-    bool is_entry;  // Whether this is the "root" frame for the current _PyCFrame.
-    char owner;
-    /* Locals and stack */
-    PyObject *localsplus[1];
-} _stp_InterpreterFrame;
-
-typedef struct _stp_InterpreterFrame _stp_Py3InterpreterFrame;
+PyHeapTypeObject _dummy_heaptype;
 
 #endif
 
-#endif
-
-#if PY_MAJOR_VERSION < 3
-#define PROVIDER HelperSDT2
-#else
 #define PROVIDER HelperSDT3
-#endif
 
 static PyObject *
 trace_callback(PyObject *self, PyObject *args)
@@ -267,7 +228,6 @@ static PyMethodDef HelperSDT_methods[] = {
 PyDoc_STRVAR(HelperSDT_doc,
 	     "This module provides an interface for interfacing between Python tracing events and systemtap.");
 
-#if PY_MAJOR_VERSION >= 3
 //
 // According to <https://docs.python.org/3/c-api/module.html>:
 //
@@ -307,29 +267,16 @@ static struct PyModuleDef moduledef = {
         NULL,				/* m_clear */
         NULL				/* m_free */
 };
-#endif
-
 
 PyMODINIT_FUNC
-#if PY_MAJOR_VERSION >= 3
 PyInit__HelperSDT(void)
-#else
-init_HelperSDT(void)
-#endif
 {
     PyObject *module;
-
-#if PY_MAJOR_VERSION >= 3
     char *stap_module;
+
     module = PyModule_Create(&moduledef);
     if (module == NULL)
 	return NULL;
-#else
-    module = Py_InitModule3("_HelperSDT", HelperSDT_methods,
-			    HelperSDT_doc);
-    if (module == NULL)
-	return;
-#endif
 
     // Add constants for the PyTrace_* values we use.
     PyModule_AddIntMacro(module, PyTrace_CALL);
@@ -337,19 +284,17 @@ init_HelperSDT(void)
     PyModule_AddIntMacro(module, PyTrace_LINE);
     PyModule_AddIntMacro(module, PyTrace_RETURN);
 
-#if PY_MAJOR_VERSION >= 3
     // Get the systemtap module name from the environment. If we found
     // it, let systemtap know information it needs.
     stap_module = getenv("SYSTEMTAP_MODULE");
     if (stap_module) {
-	// Here we force the compiler to fully resolve the function
-	// pointer value by assigning it to a variable and accessing
-	// it with the asm() statement. Otherwise we get a @GOTPCREL
-	// reference which stap can't parse.
-	void *fptr = &PyObject_GenericGetAttr;
-	asm ("nop" : "=r"(fptr) : "r"(fptr));
-	STAP_PROBE2(PROVIDER, Init, stap_module, fptr);
+        // Here we force the compiler to fully resolve the function
+        // pointer value by assigning it to a variable and accessing
+        // it with the asm() statement. Otherwise we get a @GOTPCREL
+        // reference which stap can't parse.
+        void *fptr = &PyObject_GenericGetAttr;
+        asm ("nop" : "=r"(fptr) : "r"(fptr));
+        STAP_PROBE2(PROVIDER, Init, stap_module, fptr);
     }
     return module;
-#endif
 }

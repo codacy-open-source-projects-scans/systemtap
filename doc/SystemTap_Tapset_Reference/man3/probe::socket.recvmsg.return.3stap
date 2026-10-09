@@ -2,12 +2,12 @@
 .\"     Title: probe::socket.recvmsg.return
 .\"    Author: 
 .\" Generator: DocBook XSL Stylesheets vsnapshot <http://docbook.sf.net/>
-.\"      Date: October 2025
+.\"      Date: September 2026
 .\"    Manual: Socket Tapset
-.\"    Source: SystemTap Tapset Reference
+.\"    Source: SystemTap Tapset Reference Version 5.6
 .\"  Language: English
 .\"
-.TH "PROBE::SOCKET\&.RECV" "3stap" "October 2025" "SystemTap Tapset Reference" "Socket Tapset"
+.TH "PROBE::SOCKET\&.RECV" "3stap" "September 2026" "SystemTap Tapset Reference Ver" "Socket Tapset"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -32,23 +32,13 @@ probe::socket.recvmsg.return \- Return from Message being received on socket
 .SH "SYNOPSIS"
 .sp
 .nf
-socket\&.recvmsg\&.return 
+probe socket\&.recvmsg\&.return {}
 .fi
 .SH "VALUES"
-.PP
-\fIname\fR
-.RS 4
-Name of this probe
-.RE
 .PP
 \fIprotocol\fR
 .RS 4
 Protocol value
-.RE
-.PP
-\fItype\fR
-.RS 4
-Socket type value
 .RE
 .PP
 \fIstate\fR
@@ -56,9 +46,24 @@ Socket type value
 Socket state value
 .RE
 .PP
+\fItype\fR
+.RS 4
+Socket type value
+.RE
+.PP
+\fIname\fR
+.RS 4
+Name of this probe
+.RE
+.PP
 \fIflags\fR
 .RS 4
 Socket flags value
+.RE
+.PP
+\fIsize\fR
+.RS 4
+Size of message received (in bytes) or error code if success = 0
 .RE
 .PP
 \fIfamily\fR
@@ -69,11 +74,6 @@ Protocol family value
 \fIsuccess\fR
 .RS 4
 Was receive successful? (1 = yes, 0 = no)
-.RE
-.PP
-\fIsize\fR
-.RS 4
-Size of message received (in bytes) or error code if success = 0
 .RE
 .SH "CONTEXT"
 .PP

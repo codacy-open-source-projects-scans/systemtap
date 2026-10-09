@@ -2,12 +2,12 @@
 .\"     Title: probe::staprun.send_control_message
 .\"    Author: 
 .\" Generator: DocBook XSL Stylesheets vsnapshot <http://docbook.sf.net/>
-.\"      Date: October 2025
+.\"      Date: September 2026
 .\"    Manual: SystemTap Translator Tapset
-.\"    Source: SystemTap Tapset Reference
+.\"    Source: SystemTap Tapset Reference Version 5.6
 .\"  Language: English
 .\"
-.TH "PROBE::STAPRUN\&.SEN" "3stap" "October 2025" "SystemTap Tapset Reference" "SystemTap Translator Tapset"
+.TH "PROBE::STAPRUN\&.SEN" "3stap" "September 2026" "SystemTap Tapset Reference Ver" "SystemTap Translator Tapset"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -32,13 +32,13 @@ probe::staprun.send_control_message \- Sending a control message
 .SH "SYNOPSIS"
 .sp
 .nf
-staprun\&.send_control_message 
+probe staprun\&.send_control_message {}
 .fi
 .SH "VALUES"
 .PP
-\fItype\fR
+\fIdata\fR
 .RS 4
-type of message being send; defined in runtime/transport/transport_msgs\&.h
+a ptr to a binary blob of data sent as the control message
 .RE
 .PP
 \fIlen\fR
@@ -46,9 +46,9 @@ type of message being send; defined in runtime/transport/transport_msgs\&.h
 the length (in bytes) of the data blob
 .RE
 .PP
-\fIdata\fR
+\fItype\fR
 .RS 4
-a ptr to a binary blob of data sent as the control message
+type of message being send; defined in runtime/transport/transport_msgs\&.h
 .RE
 .SH "DESCRIPTION"
 .PP

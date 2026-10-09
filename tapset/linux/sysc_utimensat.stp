@@ -43,8 +43,8 @@
 	  set_int_arg(4, flags)
 %)
 
-probe syscall.utimensat = dw_syscall.utimensat !, nd_syscall.utimensat ? {}
-probe syscall.utimensat.return = dw_syscall.utimensat.return !,
+probe syscall.utimensat = tp_syscall.utimensat !, dw_syscall.utimensat !, nd_syscall.utimensat ? {}
+probe syscall.utimensat.return = tp_syscall.utimensat.return !, dw_syscall.utimensat.return !,
                                  nd_syscall.utimensat.return ? {}
 
 # dw_utimensat _____________________________________________________
@@ -95,10 +95,10 @@ probe nd2_syscall.utimensat = kprobe.function(@arch_syscall_prefix "sys_utimensa
         %( @_IS_SREG_KERNEL %? @_SYSCALL_UTIMENSAT_REGARGS_STORE %)
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.utimensat = kernel.trace("sys_enter")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.utimensat = tp_syscall("utimensat") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_gate(@const("__NR_utimensat"))
 	@_SYSCALL_UTIMENSAT_NAME
 	@_SYSCALL_UTIMENSAT_REGARGS
@@ -125,13 +125,13 @@ probe nd2_syscall.utimensat.return = kprobe.function(@arch_syscall_prefix "sys_u
 	@SYSC_RETVALSTR(returnval())
 }
  
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.utimensat.return = kernel.trace("sys_exit")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.utimensat.return = tp_syscall("utimensat").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_gate(@const("__NR_utimensat"))
 	@_SYSCALL_UTIMENSAT_NAME
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }
 
 # compat_utimensat _____________________________________________
@@ -139,9 +139,9 @@ probe tp_syscall.utimensat.return = kernel.trace("sys_exit")
 # long compat_sys_utimensat(unsigned int dfd, char __user *filename, struct compat_timespec __user *t, int flags)
 #
 
-probe syscall.compat_utimensat = dw_syscall.compat_utimensat !,
+probe syscall.compat_utimensat = tp_syscall.compat_utimensat !, dw_syscall.compat_utimensat !,
                                  nd_syscall.compat_utimensat ? {}
-probe syscall.compat_utimensat.return = dw_syscall.compat_utimensat.return !,
+probe syscall.compat_utimensat.return = tp_syscall.compat_utimensat.return !, dw_syscall.compat_utimensat.return !,
                                         nd_syscall.compat_utimensat.return ? {}
 
 # dw_compat_utimensat _____________________________________________________
@@ -154,7 +154,13 @@ probe dw_syscall.compat_utimensat = kernel.function("compat_sys_utimensat").call
 	filename_uaddr = @__pointer($filename)
 	filename = user_string_quoted(filename_uaddr)
 	tsp_uaddr = @__pointer($t)
-	tsp_str = _struct_compat_timespec_u(tsp_uaddr, 2)
+	%( CONFIG_COMPAT_32BIT_TIME == "y" %?
+		tsp_str = _struct_compat_timespec_u(tsp_uaddr, 2)
+		try { if (_stp_syscall_nr() == @const("__NR_compat_utimensat_time64")) tsp_str = _struct_timespec_u(tsp_uaddr, 2) } catch { }
+	%:
+		tsp_str = _struct_timespec_u(tsp_uaddr, 2)
+	%)
+
 	flags = __int32($flags)
 	flags_str = _at_flag_str(__int32($flags))
 	@_SYSCALL_UTIMENSAT_ARGSTR
@@ -175,7 +181,13 @@ probe nd1_syscall.compat_utimensat = kprobe.function("compat_sys_utimensat") ?
 	@_SYSCALL_UTIMENSAT_NAME
 	asmlinkage()
 	@_SYSCALL_UTIMENSAT_REGARGS
-	tsp_str = _struct_compat_timespec_u(tsp_uaddr, 2)
+	%( CONFIG_COMPAT_32BIT_TIME == "y" %?
+		tsp_str = _struct_compat_timespec_u(tsp_uaddr, 2)
+		try { if (_stp_syscall_nr() == @const("__NR_compat_utimensat_time64")) tsp_str = _struct_timespec_u(tsp_uaddr, 2) } catch { }
+	%:
+		tsp_str = _struct_timespec_u(tsp_uaddr, 2)
+	%)
+
 	@_SYSCALL_UTIMENSAT_ARGSTR
 }
 
@@ -185,21 +197,33 @@ probe nd2_syscall.compat_utimensat = kprobe.function(@arch_syscall_prefix "compa
 	__set_syscall_pt_regs(pointer_arg(1))
 	@_SYSCALL_UTIMENSAT_NAME
 	@_SYSCALL_UTIMENSAT_REGARGS
-	tsp_str = _struct_compat_timespec_u(tsp_uaddr, 2)
+	%( CONFIG_COMPAT_32BIT_TIME == "y" %?
+		tsp_str = _struct_compat_timespec_u(tsp_uaddr, 2)
+		try { if (_stp_syscall_nr() == @const("__NR_compat_utimensat_time64")) tsp_str = _struct_timespec_u(tsp_uaddr, 2) } catch { }
+	%:
+		tsp_str = _struct_timespec_u(tsp_uaddr, 2)
+	%)
+
 	@_SYSCALL_UTIMENSAT_ARGSTR
 },
 {
         %( @_IS_SREG_KERNEL %? @_SYSCALL_UTIMENSAT_REGARGS_STORE %)
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.compat_utimensat = kernel.trace("sys_enter")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.compat_utimensat = tp_syscall("~compat_utimensat,~compat_utimensat_time64") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
-	@__compat_syscall_gate(@const("__NR_compat_utimensat"))
+	@__set_syscall_pt_regs
+	@__compat_syscall_gate2(@const("__NR_compat_utimensat"), @const("__NR_compat_utimensat_time64"))
 	@_SYSCALL_UTIMENSAT_NAME
 	@_SYSCALL_UTIMENSAT_REGARGS
-	tsp_str = _struct_compat_timespec_u(tsp_uaddr, 2)
+	%( CONFIG_COMPAT_32BIT_TIME == "y" %?
+		tsp_str = _struct_compat_timespec_u(tsp_uaddr, 2)
+		try { if (_stp_syscall_nr() == @const("__NR_compat_utimensat_time64")) tsp_str = _struct_timespec_u(tsp_uaddr, 2) } catch { }
+	%:
+		tsp_str = _struct_timespec_u(tsp_uaddr, 2)
+	%)
+
 	@_SYSCALL_UTIMENSAT_ARGSTR
 },
 {
@@ -222,11 +246,11 @@ probe nd2_syscall.compat_utimensat.return = kprobe.function(@arch_syscall_prefix
 	@SYSC_RETVALSTR(returnval())
 }
  
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.compat_utimensat.return = kernel.trace("sys_exit")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.compat_utimensat.return = tp_syscall("~compat_utimensat,~compat_utimensat_time64").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
-	@__compat_syscall_gate(@const("__NR_compat_utimensat"))
+	@__set_syscall_pt_regs
+	@__compat_syscall_gate2(@const("__NR_compat_utimensat"), @const("__NR_compat_utimensat_time64"))
 	@_SYSCALL_UTIMENSAT_NAME
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }

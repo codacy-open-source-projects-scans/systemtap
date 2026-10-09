@@ -34,8 +34,8 @@
 	  set_pointer_arg(3, buf_uaddr)
 %)
 
-probe syscall.statfs64 = dw_syscall.statfs64 !, nd_syscall.statfs64 ? {}
-probe syscall.statfs64.return = dw_syscall.statfs64.return !,
+probe syscall.statfs64 = tp_syscall.statfs64 !, dw_syscall.statfs64 !, nd_syscall.statfs64 ? {}
+probe syscall.statfs64.return = tp_syscall.statfs64.return !, dw_syscall.statfs64.return !,
                                 nd_syscall.statfs64.return ? {}
 
 # dw_statfs64 _____________________________________________________
@@ -83,10 +83,10 @@ probe nd2_syscall.statfs64 =
         %( @_IS_SREG_KERNEL %? @_SYSCALL_STATFS64_REGARGS_STORE %)
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.statfs64 = kernel.trace("sys_enter")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.statfs64 = tp_syscall("statfs64,~compat_statfs64") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_compat_gate(@const("__NR_statfs64"), @const("__NR_compat_statfs64"))
 	@_SYSCALL_STATFS64_NAME
 	@_SYSCALL_STATFS64_REGARGS
@@ -99,7 +99,7 @@ probe tp_syscall.statfs64 = kernel.trace("sys_enter")
 probe nd_syscall.statfs64.return = nd1_syscall.statfs64.return!, nd2_syscall.statfs64.return!, tp_syscall.statfs64.return
   { }
 
-probe nd1_syscall.statfs64.return =
+probe nd1_syscall.statfs64.return = 
 	kprobe.function("sys_statfs64").return ?,
 	kprobe.function("compat_sys_statfs64").return ?
 {
@@ -115,11 +115,11 @@ probe nd2_syscall.statfs64.return =
 	@SYSC_RETVALSTR(returnval())
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.statfs64.return = kernel.trace("sys_exit")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.statfs64.return = tp_syscall("statfs64,~compat_statfs64").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_compat_gate(@const("__NR_statfs64"), @const("__NR_compat_statfs64"))
 	@_SYSCALL_STATFS64_NAME
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }

@@ -4,9 +4,9 @@
 # SYSCALL_DEFINE1(inotify_init1, int, flags)
 #
 
-probe syscall.inotify_init = dw_syscall.inotify_init !,
+probe syscall.inotify_init = tp_syscall.inotify_init !, dw_syscall.inotify_init !,
                              nd_syscall.inotify_init ? {}
-probe syscall.inotify_init.return = dw_syscall.inotify_init.return !,
+probe syscall.inotify_init.return = tp_syscall.inotify_init.return !, dw_syscall.inotify_init.return !,
                                     nd_syscall.inotify_init.return ? {}
 
 # dw_inotify_init _____________________________________________________
@@ -57,7 +57,7 @@ probe nd1_syscall.inotify_init = __nd1_syscall.inotify_init1 ?,
                                  __nd1_syscall.inotify_init ?
 {
 }
-probe __nd1_syscall.inotify_init1 = kprobe.function("sys_inotify_init1")
+probe __nd1_syscall.inotify_init1 = kprobe.function("sys_inotify_init1") ?
 {
 	@__syscall_compat_gate(@const("__NR_inotify_init1"),
 			       @const("__NR_compat_inotify_init1"))
@@ -66,7 +66,7 @@ probe __nd1_syscall.inotify_init1 = kprobe.function("sys_inotify_init1")
 	flags = int_arg(1)
 	argstr = _inotify_init1_flag_str(flags)
 }
-probe __nd1_syscall.inotify_init = kprobe.function("sys_inotify_init")
+probe __nd1_syscall.inotify_init = kprobe.function("sys_inotify_init") ?
 {
 	name = "inotify_init"
 	flags = 0
@@ -101,14 +101,14 @@ probe __nd2_syscall.inotify_init =
 	argstr = ""
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
 probe tp_syscall.inotify_init = __tp_syscall.inotify_init1 ?,
                                 __tp_syscall.inotify_init ?
 {
 }
-probe __tp_syscall.inotify_init1 = kernel.trace("sys_enter")
+probe __tp_syscall.inotify_init1 = tp_syscall("inotify_init1,~compat_inotify_init1") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_compat_gate(@const("__NR_inotify_init1"), 
 			       @const("__NR_compat_inotify_init1"))
 	name = "inotify_init1"
@@ -121,9 +121,9 @@ probe __tp_syscall.inotify_init1 = kernel.trace("sys_enter")
 	  set_int_arg(1, flags)
 %)
 }
-probe __tp_syscall.inotify_init = kernel.trace("sys_enter")
+probe __tp_syscall.inotify_init = tp_syscall("inotify_init,~compat_inotify_init") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_compat_gate(@const("__NR_inotify_init"),
 			       @const("__NR_compat_inotify_init"))
 	name = "inotify_init"
@@ -138,16 +138,16 @@ probe nd1_syscall.inotify_init.return = __nd1_syscall.inotify_init1.return ?,
                                         __nd1_syscall.inotify_init.return ?
 {
 }
-probe __nd1_syscall.inotify_init1.return =
-	kprobe.function("sys_inotify_init1").return
+probe __nd1_syscall.inotify_init1.return = 
+	kprobe.function("sys_inotify_init1").return ?
 {
 	@__syscall_compat_gate(@const("__NR_inotify_init1"),
 			       @const("__NR_compat_inotify_init1"))
 	name = "inotify_init1"
 	@SYSC_RETVALSTR(returnval())
 }
-probe __nd1_syscall.inotify_init.return =
-	kprobe.function("sys_inotify_init").return
+probe __nd1_syscall.inotify_init.return = 
+	kprobe.function("sys_inotify_init").return ?
 {
 	name = "inotify_init"
 	@SYSC_RETVALSTR(returnval())
@@ -171,24 +171,24 @@ probe __nd2_syscall.inotify_init.return =
 	@SYSC_RETVALSTR(returnval())
 }
  
-/* kernel 3.5+, but undesirable because it affects all syscalls */
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
 probe tp_syscall.inotify_init.return = __tp_syscall.inotify_init1.return ?,
                                        __tp_syscall.inotify_init.return ?
 {
 }
-probe __tp_syscall.inotify_init1.return = kernel.trace("sys_exit")
+probe __tp_syscall.inotify_init1.return = tp_syscall("inotify_init1,~compat_inotify_init1").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_compat_gate(@const("__NR_inotify_init1"), 
 			       @const("__NR_compat_inotify_init1"))
 	name = "inotify_init1"
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }
-probe __tp_syscall.inotify_init.return = kernel.trace("sys_exit")
+probe __tp_syscall.inotify_init.return = tp_syscall("inotify_init,~compat_inotify_init").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_compat_gate(@const("__NR_inotify_init"),
 			       @const("__NR_compat_inotify_init"))
 	name = "inotify_init"
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }

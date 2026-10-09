@@ -48,9 +48,9 @@
 	  set_pointer_arg(4, ovalue_uaddr)
 %)
 
-probe syscall.timerfd_settime = dw_syscall.timerfd_settime !,
+probe syscall.timerfd_settime = tp_syscall.timerfd_settime !, dw_syscall.timerfd_settime !,
                                 nd_syscall.timerfd_settime ? {}
-probe syscall.timerfd_settime.return = dw_syscall.timerfd_settime.return !,
+probe syscall.timerfd_settime.return = tp_syscall.timerfd_settime.return !, dw_syscall.timerfd_settime.return !,
                                        nd_syscall.timerfd_settime.return ? {}
 
 # dw_timerfd_settime _____________________________________________________
@@ -98,7 +98,7 @@ probe nd1_syscall.timerfd_settime = __nd1_syscall.timerfd_settime ?,
 {
 	@_SYSCALL_TIMERFD_SETTIME_NAME
 }
-probe __nd1_syscall.timerfd_settime =
+probe __nd1_syscall.timerfd_settime = 
 	kprobe.function("sys_timerfd_settime").call ?
 {
 	@__syscall_gate_compat_simple
@@ -106,7 +106,7 @@ probe __nd1_syscall.timerfd_settime =
 	@_SYSCALL_TIMERFD_SETTIME_REGARGS
 	@_SYSCALL_TIMERFD_SETTIME_ARGSTR
 }
-probe __nd1_syscall.compat_timerfd_settime =
+probe __nd1_syscall.compat_timerfd_settime = 
 	kprobe.function("compat_sys_timerfd_settime").call ?
 {
 	asmlinkage()
@@ -128,11 +128,11 @@ probe nd2_syscall.timerfd_settime =
         %( @_IS_SREG_KERNEL %? @_SYSCALL_TIMERFD_SETTIME_REGARGS_STORE %)
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.timerfd_settime = kernel.trace("sys_enter")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.timerfd_settime = tp_syscall("timerfd_settime,~compat_timerfd_settime,~compat_timerfd_settime64") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
-	@__syscall_compat_gate(@const("__NR_timerfd_settime"), @const("__NR_compat_timerfd_settime"))
+	@__set_syscall_pt_regs
+	@__syscall_compat_gate2(@const("__NR_timerfd_settime"), @const("__NR_compat_timerfd_settime"), @const("__NR_compat_timerfd_settime64"))
 	@_SYSCALL_TIMERFD_SETTIME_NAME
 	@_SYSCALL_TIMERFD_SETTIME_REGARGS
 	@_SYSCALL_TIMERFD_SETTIME_ARGSTR
@@ -150,7 +150,7 @@ probe nd1_syscall.timerfd_settime.return = __nd1_syscall.timerfd_settime.return 
 	@_SYSCALL_TIMERFD_SETTIME_NAME
 	@SYSC_RETVALSTR(returnval())
 }
-probe __nd1_syscall.timerfd_settime.return =
+probe __nd1_syscall.timerfd_settime.return = 
 	kprobe.function("sys_timerfd_settime").return ?
 {
 	@__syscall_gate_compat_simple
@@ -165,11 +165,11 @@ probe nd2_syscall.timerfd_settime.return =
 	@SYSC_RETVALSTR(returnval())
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.timerfd_settime.return = kernel.trace("sys_exit")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.timerfd_settime.return = tp_syscall("timerfd_settime,~compat_timerfd_settime,~compat_timerfd_settime64").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
-	@__syscall_compat_gate(@const("__NR_timerfd_settime"), @const("__NR_compat_timerfd_settime"))
+	@__set_syscall_pt_regs
+	@__syscall_compat_gate2(@const("__NR_timerfd_settime"), @const("__NR_compat_timerfd_settime"), @const("__NR_compat_timerfd_settime64"))
 	@_SYSCALL_TIMERFD_SETTIME_NAME
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }

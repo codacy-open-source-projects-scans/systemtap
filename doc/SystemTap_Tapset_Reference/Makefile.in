@@ -244,21 +244,15 @@ PKG_CONFIG = @PKG_CONFIG@
 PKG_CONFIG_LIBDIR = @PKG_CONFIG_LIBDIR@
 PKG_CONFIG_PATH = @PKG_CONFIG_PATH@
 POSUB = @POSUB@
-PYTHON = @PYTHON@
 PYTHON3 = @PYTHON3@
 PYTHON3_CONFIG = @PYTHON3_CONFIG@
 PYTHON3_CPPFLAGS = @PYTHON3_CPPFLAGS@
 PYTHON3_EXEC_PREFIX = @PYTHON3_EXEC_PREFIX@
+PYTHON3_LIBPYTHON = @PYTHON3_LIBPYTHON@
+PYTHON3_MINOR = @PYTHON3_MINOR@
 PYTHON3_PLATFORM = @PYTHON3_PLATFORM@
 PYTHON3_PREFIX = @PYTHON3_PREFIX@
 PYTHON3_VERSION = @PYTHON3_VERSION@
-PYTHON_CONFIG = @PYTHON_CONFIG@
-PYTHON_CPPFLAGS = @PYTHON_CPPFLAGS@
-PYTHON_EXEC_PREFIX = @PYTHON_EXEC_PREFIX@
-PYTHON_PLATFORM = @PYTHON_PLATFORM@
-PYTHON_PREFIX = @PYTHON_PREFIX@
-PYTHON_UNKNOWN = @PYTHON_UNKNOWN@
-PYTHON_VERSION = @PYTHON_VERSION@
 RANLIB = @RANLIB@
 READLINE_LIBS = @READLINE_LIBS@
 SED = @SED@
@@ -269,6 +263,7 @@ STAP_PREFIX = @STAP_PREFIX@
 STRIP = @STRIP@
 USE_NLS = @USE_NLS@
 VERSION = @VERSION@
+WNO_TEMPLATE_BODY = @WNO_TEMPLATE_BODY@
 XGETTEXT = @XGETTEXT@
 XGETTEXT_015 = @XGETTEXT_015@
 XGETTEXT_EXTRA_OPTIONS = @XGETTEXT_EXTRA_OPTIONS@
@@ -323,6 +318,8 @@ infodir = @infodir@
 install_sh = @install_sh@
 jsonc_CFLAGS = @jsonc_CFLAGS@
 jsonc_LIBS = @jsonc_LIBS@
+libbpf_CFLAGS = @libbpf_CFLAGS@
+libbpf_LIBS = @libbpf_LIBS@
 libdir = @libdir@
 libexecdir = @libexecdir@
 libvirt_CFLAGS = @libvirt_CFLAGS@
@@ -341,16 +338,12 @@ oldincludedir = @oldincludedir@
 openssl_CFLAGS = @openssl_CFLAGS@
 openssl_LIBS = @openssl_LIBS@
 pdfdir = @pdfdir@
-pkgpyexecdir = @pkgpyexecdir@
-pkgpythondir = @pkgpythondir@
 preferred_python = @preferred_python@
 prefix = @prefix@
 program_transform_name = @program_transform_name@
 psdir = @psdir@
 py3execdir = @py3execdir@
-pyexecdir = @pyexecdir@
 python3dir = @python3dir@
-pythondir = @pythondir@
 runstatedir = @runstatedir@
 sbindir = @sbindir@
 selinux_CFLAGS = @selinux_CFLAGS@
@@ -629,8 +622,16 @@ uninstall-am:
 
 @BUILD_REFDOCS_TRUE@all: stamp-htmldocs
 @BUILD_REFDOCS_TRUE@tapsets.xml: docproc $(shell find $(SRCTREE)/tapset -name '*.stp')
-@BUILD_HTMLDOCS_TRUE@@BUILD_REFDOCS_TRUE@	sed -e '/^!Syscalls/{r $(abs_srcdir)/syscalls.xmlpart' -e 'd}' $(abs_srcdir)/tapsets.tmpl > tapsets.tmpl.new
-@BUILD_HTMLDOCS_TRUE@@BUILD_REFDOCS_TRUE@	SRCTREE=$(SRCTREE) $(DOCPROC) doc tapsets.tmpl.new > tapsets.xml.new
+@BUILD_HTMLDOCS_TRUE@@BUILD_REFDOCS_TRUE@	if test -n "$$SOURCE_DATE_EPOCH"; then \
+@BUILD_HTMLDOCS_TRUE@@BUILD_REFDOCS_TRUE@		build_date=$$(date -u -d "@$$SOURCE_DATE_EPOCH" +%Y-%m-%d) || exit $$?; \
+@BUILD_HTMLDOCS_TRUE@@BUILD_REFDOCS_TRUE@	else \
+@BUILD_HTMLDOCS_TRUE@@BUILD_REFDOCS_TRUE@		build_date=$$(date +%Y-%m-%d) || exit $$?; \
+@BUILD_HTMLDOCS_TRUE@@BUILD_REFDOCS_TRUE@	fi; \
+@BUILD_HTMLDOCS_TRUE@@BUILD_REFDOCS_TRUE@	sed -e '/^!Syscalls/{r $(abs_srcdir)/syscalls.xmlpart' -e 'd}' \
+@BUILD_HTMLDOCS_TRUE@@BUILD_REFDOCS_TRUE@	    -e "s|@RELEASEINFO@|Version $(PACKAGE_VERSION)|g" \
+@BUILD_HTMLDOCS_TRUE@@BUILD_REFDOCS_TRUE@	    -e "s|@BUILDDATE@|$$build_date|g" \
+@BUILD_HTMLDOCS_TRUE@@BUILD_REFDOCS_TRUE@	    $(abs_srcdir)/tapsets.tmpl > tapsets.tmpl.new
+@BUILD_HTMLDOCS_TRUE@@BUILD_REFDOCS_TRUE@	PERL_HASH_SEED=42 PERL_PERTURB_KEYS=0 SRCTREE=$(SRCTREE) $(DOCPROC) doc tapsets.tmpl.new > tapsets.xml.new
 @BUILD_HTMLDOCS_TRUE@@BUILD_REFDOCS_TRUE@	$(preferred_python) $(srcdir)/overload.py tapsets.xml.new > tapsets.xml.new1
 @BUILD_HTMLDOCS_TRUE@@BUILD_REFDOCS_TRUE@	xsltproc $(srcdir)/sort-tapsets.xslt tapsets.xml.new1 > tapsets.xml.new2
 @BUILD_HTMLDOCS_TRUE@@BUILD_REFDOCS_TRUE@	rm tapsets.xml.new tapsets.xml.new1 tapsets.tmpl.new

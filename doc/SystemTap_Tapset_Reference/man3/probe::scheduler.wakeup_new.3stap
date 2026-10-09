@@ -2,12 +2,12 @@
 .\"     Title: probe::scheduler.wakeup_new
 .\"    Author: 
 .\" Generator: DocBook XSL Stylesheets vsnapshot <http://docbook.sf.net/>
-.\"      Date: October 2025
+.\"      Date: September 2026
 .\"    Manual: Scheduler Tapset
-.\"    Source: SystemTap Tapset Reference
+.\"    Source: SystemTap Tapset Reference Version 5.6
 .\"  Language: English
 .\"
-.TH "PROBE::SCHEDULER\&.W" "3stap" "October 2025" "SystemTap Tapset Reference" "Scheduler Tapset"
+.TH "PROBE::SCHEDULER\&.W" "3stap" "September 2026" "SystemTap Tapset Reference Ver" "Scheduler Tapset"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -32,14 +32,9 @@ probe::scheduler.wakeup_new \- Newly created task is woken up for the first time
 .SH "SYNOPSIS"
 .sp
 .nf
-scheduler\&.wakeup_new 
+probe scheduler\&.wakeup_new {}
 .fi
 .SH "VALUES"
-.PP
-\fItask_pid\fR
-.RS 4
-PID of the new task woken up
-.RE
 .PP
 \fItask_priority\fR
 .RS 4
@@ -51,6 +46,16 @@ priority of the new task
 TID of the new task woken up
 .RE
 .PP
+\fItask_cpu\fR
+.RS 4
+cpu of the task woken up
+.RE
+.PP
+\fItask_pid\fR
+.RS 4
+PID of the new task woken up
+.RE
+.PP
 \fIname\fR
 .RS 4
 name of the probe point
@@ -59,11 +64,6 @@ name of the probe point
 \fItask_state\fR
 .RS 4
 state of the task woken up
-.RE
-.PP
-\fItask_cpu\fR
-.RS 4
-cpu of the task woken up
 .RE
 .SH SEE ALSO\n 
 .IR tapset::scheduler (3stap)

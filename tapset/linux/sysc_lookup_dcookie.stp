@@ -35,8 +35,8 @@
 %)
 %)
 
-probe syscall.lookup_dcookie = dw_syscall.lookup_dcookie !, nd_syscall.lookup_dcookie ? {}
-probe syscall.lookup_dcookie.return = dw_syscall.lookup_dcookie.return !,
+probe syscall.lookup_dcookie = tp_syscall.lookup_dcookie !, dw_syscall.lookup_dcookie !, nd_syscall.lookup_dcookie ? {}
+probe syscall.lookup_dcookie.return = tp_syscall.lookup_dcookie.return !, dw_syscall.lookup_dcookie.return !,
                                       nd_syscall.lookup_dcookie.return ? {}
 
 # dw_lookup_dcookie _____________________________________________________
@@ -96,10 +96,10 @@ probe nd2_syscall.lookup_dcookie = kprobe.function(@arch_syscall_prefix "sys_loo
         %( @_IS_SREG_KERNEL %? @_SYSCALL_LOOKUP_DCOOKIE_REGARGS_STORE %)
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.lookup_dcookie = kernel.trace("sys_enter")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.lookup_dcookie = tp_syscall("lookup_dcookie") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_gate(@const("__NR_lookup_dcookie"))
 	@_SYSCALL_LOOKUP_DCOOKIE_NAME
 %( CONFIG_64BIT == "y" %?
@@ -137,11 +137,11 @@ probe nd2_syscall.lookup_dcookie.return = kprobe.function(@arch_syscall_prefix "
 	@SYSC_RETVALSTR(returnval())
 }
  
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.lookup_dcookie.return = kernel.trace("sys_exit")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.lookup_dcookie.return = tp_syscall("lookup_dcookie").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_gate(@const("__NR_lookup_dcookie"))
 	@_SYSCALL_LOOKUP_DCOOKIE_NAME
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }

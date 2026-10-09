@@ -175,7 +175,6 @@ datadir = @datadir@
 datarootdir = @datarootdir@
 docdir = @docdir@
 dvidir = @dvidir@
-enable_testapps = @enable_testapps@
 exec_prefix = @exec_prefix@
 host_alias = @host_alias@
 htmldir = @htmldir@
@@ -194,8 +193,6 @@ prefix = @prefix@
 program_transform_name = @program_transform_name@
 psdir = @psdir@
 py3execdir = @py3execdir@
-pyexecdir = @pyexecdir@
-python = @python@
 python3 = @python3@
 runstatedir = @runstatedir@
 sbindir = @sbindir@
@@ -207,7 +204,6 @@ top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
 AUTOMAKE_OPTIONS = dejagnu no-dist subdir-objects
-TESTAPPS = @enable_testapps@
 
 # There are a few tests known to be slow. We run them right from the beginning
 # to try to lessen the overall time taken by the test suite -- if one of these
@@ -242,14 +238,13 @@ SYSTEMTAP_SPATH = $(DESTDIR)$(sbindir)
 SYSTEMTAP_INCLUDES = $(DESTDIR)$(includedir)
 
 # These values get passed down from the main configure.
-PYTHON = @python@
-PYEXECDIR = @pyexecdir@
 PYTHON3 = @python3@
 PY3EXECDIR = @py3execdir@
 SYSCONFDIR = @sysconfdir@
 RUNTESTDEFAULTFLAGS = --tool $$tool --srcdir $(shell readlink -f $(srcdir))
 EXPECT = expect
-RUNTEST = env --unset=DEBUGINFOD_VERBOSE --unset=DEBUGINFOD_PROGRESS XDG_DATA_DIRS= SYSTEMTAP_SYNC=1 LANG=C SYSTEMTAP_TESTREMOTES=$(TESTREMOTES) SYSTEMTAP_TESTAPPS=$(TESTAPPS) SYSTEMTAP_RUNTIME=$(SYSTEMTAP_RUNTIME) SYSTEMTAP_TAPSET=$(SYSTEMTAP_TAPSET) CRASH_LIBDIR=$(CRASH_LIBDIR) PATH=$(SYSTEMTAP_PATH):$(SYSTEMTAP_SPATH):$$PATH SYSTEMTAP_PATH=$(SYSTEMTAP_PATH) SYSTEMTAP_SPATH=$(SYSTEMTAP_SPATH) SYSTEMTAP_INCLUDES=$(SYSTEMTAP_INCLUDES) PKGLIBDIR=$(pkglibexecdir) PYTHON=$(PYTHON) PYEXECDIR=$(PYEXECDIR) PYTHON3=$(PYTHON3) PY3EXECDIR=$(PY3EXECDIR) SYSCONFDIR=$(SYSCONFDIR) runtest
+# Disable core dumps during testsuite runs to prevent dyninst crashes from filling disk
+RUNTEST = prlimit --core=0 env --unset=DEBUGINFOD_VERBOSE --unset=DEBUGINFOD_PROGRESS XDG_DATA_DIRS= SYSTEMTAP_SYNC=1 LANG=C SYSTEMTAP_TESTREMOTES=$(TESTREMOTES) SYSTEMTAP_RUNTIME=$(SYSTEMTAP_RUNTIME) SYSTEMTAP_TAPSET=$(SYSTEMTAP_TAPSET) CRASH_LIBDIR=$(CRASH_LIBDIR) PATH=$(SYSTEMTAP_PATH):$(SYSTEMTAP_SPATH):$$PATH SYSTEMTAP_PATH=$(SYSTEMTAP_PATH) SYSTEMTAP_SPATH=$(SYSTEMTAP_SPATH) SYSTEMTAP_INCLUDES=$(SYSTEMTAP_INCLUDES) PKGLIBDIR=$(pkglibexecdir) PYTHON3=$(PYTHON3) PY3EXECDIR=$(PY3EXECDIR) SYSCONFDIR=$(SYSCONFDIR) runtest
 all: all-am
 
 .SUFFIXES:

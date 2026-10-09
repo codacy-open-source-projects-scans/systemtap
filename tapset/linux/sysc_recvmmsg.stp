@@ -43,8 +43,8 @@
 	  set_pointer_arg(5, timeout_addr)
 %)
 
-probe syscall.recvmmsg = dw_syscall.recvmmsg !, nd_syscall.recvmmsg ? {}
-probe syscall.recvmmsg.return = dw_syscall.recvmmsg.return !,
+probe syscall.recvmmsg = tp_syscall.recvmmsg !, dw_syscall.recvmmsg !, nd_syscall.recvmmsg ? {}
+probe syscall.recvmmsg.return = tp_syscall.recvmmsg.return !, dw_syscall.recvmmsg.return !,
                                 nd_syscall.recvmmsg.return ? {}
 
 # dw_recvmmsg _____________________________________________________
@@ -94,10 +94,10 @@ probe nd2_syscall.recvmmsg = kprobe.function(@arch_syscall_prefix "sys_recvmmsg"
         %( @_IS_SREG_KERNEL %? @_SYSCALL_RECVMMSG_REGARGS_STORE %)
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.recvmmsg = kernel.trace("sys_enter")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.recvmmsg = tp_syscall("recvmmsg") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_gate(@const("__NR_recvmmsg"))
 	@_SYSCALL_RECVMMSG_NAME
 	@_SYSCALL_RECVMMSG_REGARGS
@@ -124,13 +124,13 @@ probe nd2_syscall.recvmmsg.return = kprobe.function(@arch_syscall_prefix "sys_re
 	@SYSC_RETVALSTR(returnval())
 }
  
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.recvmmsg.return = kernel.trace("sys_exit")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.recvmmsg.return = tp_syscall("recvmmsg").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_gate(@const("__NR_recvmmsg"))
 	@_SYSCALL_RECVMMSG_NAME
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }
 
 # compat_recvmmsg ___________________________________________________
@@ -140,9 +140,9 @@ probe tp_syscall.recvmmsg.return = kernel.trace("sys_exit")
 #			   struct compat_timespec __user *timeout)
 #
 
-probe syscall.compat_recvmmsg = dw_syscall.compat_recvmmsg !,
+probe syscall.compat_recvmmsg = tp_syscall.compat_recvmmsg !, dw_syscall.compat_recvmmsg !,
                                  nd_syscall.compat_recvmmsg ? {}
-probe syscall.compat_recvmmsg.return = dw_syscall.compat_recvmmsg.return !,
+probe syscall.compat_recvmmsg.return = tp_syscall.compat_recvmmsg.return !, dw_syscall.compat_recvmmsg.return !,
                                        nd_syscall.compat_recvmmsg.return ? {}
 
 # dw_compat_recvmmsg _____________________________________________________
@@ -156,7 +156,13 @@ probe dw_syscall.compat_recvmmsg = kernel.function("compat_sys_recvmmsg").call ?
 	flags = __uint32($flags)
 	flags_str = _msg_flags_str(flags)
 	timeout_uaddr = $timeout
-	timeout_str = _struct_compat_timespec_u(timeout_uaddr, 1)
+	%( CONFIG_COMPAT_32BIT_TIME == "y" %?
+		timeout_str = _struct_compat_timespec_u(timeout_uaddr, 1)
+		try { if (_stp_syscall_nr() == @const("__NR_compat_recvmmsg_time64")) timeout_str = _struct_timespec_u(timeout_uaddr, 1) } catch { }
+	%:
+		timeout_str = _struct_timespec_u(timeout_uaddr, 1)
+	%)
+
 	@_SYSCALL_RECVMMSG_ARGSTR
 }
 probe dw_syscall.compat_recvmmsg.return =
@@ -176,7 +182,13 @@ probe nd1_syscall.compat_recvmmsg = kprobe.function("compat_sys_recvmmsg").call 
 	@_SYSCALL_RECVMMSG_NAME
 	asmlinkage()
 	@_SYSCALL_RECVMMSG_REGARGS
-	timeout_str = _struct_compat_timespec_u(timeout_uaddr, 1)
+	%( CONFIG_COMPAT_32BIT_TIME == "y" %?
+		timeout_str = _struct_compat_timespec_u(timeout_uaddr, 1)
+		try { if (_stp_syscall_nr() == @const("__NR_compat_recvmmsg_time64")) timeout_str = _struct_timespec_u(timeout_uaddr, 1) } catch { }
+	%:
+		timeout_str = _struct_timespec_u(timeout_uaddr, 1)
+	%)
+
 	@_SYSCALL_RECVMMSG_ARGSTR
 }
 
@@ -186,25 +198,37 @@ probe nd2_syscall.compat_recvmmsg = kprobe.function(@arch_syscall_prefix "compat
 	__set_syscall_pt_regs(pointer_arg(1))
 	@_SYSCALL_RECVMMSG_NAME
 	@_SYSCALL_RECVMMSG_REGARGS
-	timeout_str = _struct_compat_timespec_u(timeout_uaddr, 1)
+	%( CONFIG_COMPAT_32BIT_TIME == "y" %?
+		timeout_str = _struct_compat_timespec_u(timeout_uaddr, 1)
+		try { if (_stp_syscall_nr() == @const("__NR_compat_recvmmsg_time64")) timeout_str = _struct_timespec_u(timeout_uaddr, 1) } catch { }
+	%:
+		timeout_str = _struct_timespec_u(timeout_uaddr, 1)
+	%)
+
 	@_SYSCALL_RECVMMSG_ARGSTR
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.compat_recvmmsg = kernel.trace("sys_enter")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.compat_recvmmsg = tp_syscall("~compat_recvmmsg,~compat_recvmmsg_time64") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
-	@__compat_syscall_gate(@const("__NR_compat_recvmmsg"))
+	@__set_syscall_pt_regs
+	@__compat_syscall_gate2(@const("__NR_compat_recvmmsg"), @const("__NR_compat_recvmmsg_time64"))
 	@_SYSCALL_RECVMMSG_NAME
 	@_SYSCALL_RECVMMSG_REGARGS
-	timeout_str = _struct_compat_timespec_u(timeout_uaddr, 1)
+	%( CONFIG_COMPAT_32BIT_TIME == "y" %?
+		timeout_str = _struct_compat_timespec_u(timeout_uaddr, 1)
+		try { if (_stp_syscall_nr() == @const("__NR_compat_recvmmsg_time64")) timeout_str = _struct_timespec_u(timeout_uaddr, 1) } catch { }
+	%:
+		timeout_str = _struct_timespec_u(timeout_uaddr, 1)
+	%)
+
 	@_SYSCALL_RECVMMSG_ARGSTR
 }
 
 probe nd_syscall.compat_recvmmsg.return = nd1_syscall.compat_recvmmsg.return!, nd2_syscall.compat_recvmmsg.return!, tp_syscall.compat_recvmmsg.return
   { }
   
-probe nd1_syscall.compat_recvmmsg.return =
+probe nd1_syscall.compat_recvmmsg.return = 
 	kprobe.function("compat_sys_recvmmsg").return ?
 {
 	@_SYSCALL_RECVMMSG_NAME
@@ -218,11 +242,11 @@ probe nd2_syscall.compat_recvmmsg.return = kprobe.function(@arch_syscall_prefix 
 	@SYSC_RETVALSTR(returnval())
 }
  
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.compat_recvmmsg.return = kernel.trace("sys_exit")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.compat_recvmmsg.return = tp_syscall("~compat_recvmmsg,~compat_recvmmsg_time64").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
-	@__compat_syscall_gate(@const("__NR_compat_recvmmsg"))
+	@__set_syscall_pt_regs
+	@__compat_syscall_gate2(@const("__NR_compat_recvmmsg"), @const("__NR_compat_recvmmsg_time64"))
 	@_SYSCALL_RECVMMSG_NAME
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }

@@ -36,8 +36,8 @@
 	  set_pointer_arg(3, iocbpp_uaddr)
 %)
 
-probe syscall.io_submit = dw_syscall.io_submit !, nd_syscall.io_submit ? {}
-probe syscall.io_submit.return = dw_syscall.io_submit.return !, nd_syscall.io_submit.return ? {}
+probe syscall.io_submit = tp_syscall.io_submit !, dw_syscall.io_submit !, nd_syscall.io_submit ? {}
+probe syscall.io_submit.return = tp_syscall.io_submit.return !, dw_syscall.io_submit.return !, nd_syscall.io_submit.return ? {}
 
 # dw_io_submit _____________________________________________________
 
@@ -70,7 +70,7 @@ probe __syscall.io_submit.return = kernel.function("sys_io_submit").return
 probe nd_syscall.io_submit = nd1_syscall.io_submit!, nd2_syscall.io_submit!, tp_syscall.io_submit
   { }
 
-probe nd1_syscall.io_submit = __nd1_syscall.io_submit,
+probe nd1_syscall.io_submit = __nd1_syscall.io_submit ?,
 	kprobe.function("compat_sys_io_submit") ?
 {
 	@_SYSCALL_IO_SUBMIT_NAME
@@ -96,10 +96,10 @@ probe nd2_syscall.io_submit = kprobe.function(@arch_syscall_prefix "sys_io_submi
         %( @_IS_SREG_KERNEL %? @_SYSCALL_IO_SUBMIT_REGARGS_STORE %)
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.io_submit = kernel.trace("sys_enter")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.io_submit = tp_syscall("io_submit,~compat_io_submit") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_compat_gate(@const("__NR_io_submit"), @const("__NR_compat_io_submit"))
 	@_SYSCALL_IO_SUBMIT_NAME
 	@_SYSCALL_IO_SUBMIT_REGARGS
@@ -112,7 +112,7 @@ probe tp_syscall.io_submit = kernel.trace("sys_enter")
 probe nd_syscall.io_submit.return = nd1_syscall.io_submit.return!, nd2_syscall.io_submit.return!, tp_syscall.io_submit.return
   { }
 
-probe nd1_syscall.io_submit.return = __nd1_syscall.io_submit.return,
+probe nd1_syscall.io_submit.return = __nd1_syscall.io_submit.return ?,
 	kprobe.function("compat_sys_io_submit").return ?
 {
 	@_SYSCALL_IO_SUBMIT_NAME
@@ -131,11 +131,11 @@ probe nd2_syscall.io_submit.return = kprobe.function(@arch_syscall_prefix "sys_i
 	@SYSC_RETVALSTR(returnval())
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.io_submit.return = kernel.trace("sys_exit")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.io_submit.return = tp_syscall("io_submit,~compat_io_submit").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_compat_gate(@const("__NR_io_submit"), @const("__NR_compat_io_submit"))
 	@_SYSCALL_IO_SUBMIT_NAME
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }

@@ -155,6 +155,7 @@ utrace_derived_probe::utrace_derived_probe (systemtap_session &s,
     {
       stapfile *f = new stapfile;
       f->probes.push_back(v.add_probe);
+      lock_guard<recursive_mutex> gl (s.session_data_mutex);
       s.files.push_back(f);
     }
 
@@ -304,7 +305,8 @@ utrace_var_expanding_visitor::visit_target_symbol_cached (target_symbol* e)
 		      + e->sym_name()
 		      + "_" + lex_cast(tick++));
       vardecl* vd = new vardecl;
-      vd->name = aname;
+      vd->name = vd->unmangled_name = aname;
+      vd->synthetic = true;
       vd->tok = e->tok;
       sess.globals.push_back (vd);
 
@@ -447,7 +449,7 @@ utrace_var_expanding_visitor::visit_target_symbol_cached (target_symbol* e)
 
 	   vardecl* vd = new vardecl;
 	   vd->tok = e->tok;
-	   vd->name = tidsym->name;
+	   vd->name = vd->unmangled_name = tidsym->name;
 	   vd->type = pe_long;
 	   vd->set_arity(0, e->tok);
 	   add_probe->locals.push_back(vd);
@@ -652,11 +654,10 @@ utrace_var_expanding_visitor::visit_target_symbol (target_symbol* e)
 struct utrace_builder: public derived_probe_builder
 {
   utrace_builder() {}
-  virtual void build(systemtap_session & sess,
-		     probe * base,
-		     probe_point * location,
-		     literal_map_t const & parameters,
-		     vector<derived_probe *> & finished_results)
+  virtual vector<derived_probe *> build(systemtap_session & sess,
+                                        probe * base,
+                                        probe_point * location,
+                                        literal_map_t const & parameters)
   {
     interned_string path, path_tgt;
     int64_t pid;
@@ -713,9 +714,11 @@ struct utrace_builder: public derived_probe_builder
         path_tgt = path_remove_sysroot(sess, path);
       }
 
-    finished_results.push_back(new utrace_derived_probe(sess, base, location,
-							has_path, path_tgt, pid,
-							flags));
+    vector<derived_probe *> results;
+    results.push_back(new utrace_derived_probe(sess, base, location,
+					       has_path, path_tgt, pid,
+					       flags));
+    return results;
   }
 
   virtual string name() { return "utrace builder"; }

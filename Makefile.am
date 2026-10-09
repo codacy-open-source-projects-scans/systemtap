@@ -23,9 +23,14 @@ if Werror
 AM_CFLAGS += -Werror
 AM_CXXFLAGS += -Werror
 endif
+if enable_glibcxx_debug
+AM_CXXFLAGS += -D_GLIBCXX_DEBUG -D_GLIBCXX_DEBUG_PEDANTIC
+endif
 
 bin_SCRIPTS = stap-report stap-profile-annotate stap-prep
+nodist_bin_SCRIPTS = initscript/stap-onboot
 pkglibexec_SCRIPTS = stap-env
+nodist_pkglibexec_SCRIPTS = initscript/stap-service-prepare
 oldinclude_HEADERS = includes/sys/sdt.h includes/sys/sdt-config.h
 
 bin_PROGRAMS =
@@ -48,10 +53,10 @@ endif
 
 stap_SOURCES = main.cxx session.cxx \
 	parse.cxx staptree.cxx elaborate.cxx translate.cxx \
-	tapsets.cxx buildrun.cxx loc2stap.cxx hash.cxx mdfour.c \
+	tapsets.cxx tracepoint-vmlinux.cxx buildrun.cxx loc2stap.cxx hash.cxx mdfour.c \
 	cache.cxx staputil.cxx coveragedb.cxx dwarf_wrappers.cxx \
 	tapset-been.cxx tapset-procfs.cxx tapset-timers.cxx tapset-netfilter.cxx \
-	tapset-perfmon.cxx tapset-mark.cxx \
+	tapset-perfmon.cxx \
 	tapset-utrace.cxx task_finder.cxx dwflpp.cxx rpm_finder.cxx \
 	setupdwfl.cxx remote.cxx privilege.cxx cmdline.cxx \
 	tapset-dynprobe.cxx tapset-method.cxx translator-output.cxx \
@@ -95,6 +100,57 @@ all: macros.systemtap
 
 macros.systemtap: $(srcdir)/macros.systemtap.in
 	sed -e "s#@pkgdatadir@#$(pkgdatadir)#g" < $< > $@
+
+# Python tapset selection: at build time, copy exactly one
+# python3.NN.stp.candidate (chosen by the python version used to
+# build _HelperSDT.so) to tapset/python3.stp in the build tree and
+# install that file.  configure/Makefile also generate tapset/python3.stpm
+# with @define stap_python3_libpython for libpython @cast paths.
+# Source trees keep only .stp.candidate files per minor; build and install
+# trees have python3.stp plus the generated python3.stpm.  Each
+# .stp.candidate is free of cross-version @defined()/@choose_defined()
+# and can use real libpython DWARF types directly.
+#
+# VPATH / separate build directory note: python3.stp and python3.stpm are
+# the first tapset files generated under $(builddir)/tapset/ (all other
+# tapset/*.stp and *.stpm remain in $(srcdir)/tapset).  In-tree builds
+# (srcdir = builddir) are fine.  When srcdir != builddir, "make check"
+# still points SYSTEMTAP_TAPSET at $(srcdir)/tapset (see check-local
+# below), so the generated files are not visible there; run-stap.in has
+# the same limitation.  That does not affect "make check" for python3.exp
+# (installtest_p; needs installcheck + install tree) or normal use after
+# "make install".  To exercise python3 probes from a VPATH build tree
+# without installing, set SYSTEMTAP_TAPSET to $(builddir)/tapset and
+# supply the static tapsets too (e.g. stap -I $(srcdir)/tapset ...).
+if HAVE_PYTHON3_PROBES
+TAPSET_PYTHON3_STP = tapset/python3.stp
+TAPSET_PYTHON3_STPM = tapset/python3.stpm
+TAPSET_PYTHON3_CANDIDATE = tapset/python3.$(PYTHON3_MINOR).stp.candidate
+else
+TAPSET_PYTHON3_STP =
+TAPSET_PYTHON3_STPM =
+TAPSET_PYTHON3_CANDIDATE =
+endif
+
+if HAVE_PYTHON3_PROBES
+all-local: $(TAPSET_PYTHON3_STP) $(TAPSET_PYTHON3_STPM)
+endif
+
+$(TAPSET_PYTHON3_STP): $(srcdir)/$(TAPSET_PYTHON3_CANDIDATE)
+	mkdir -p tapset # create build-tree tapset/ dir if needed
+	cp $< $@
+
+# The libpython path baked into python3.stpm is resolved at run time on the
+# machine being probed, so it has to be the installed location.  configure
+# gets PYTHON3_LIBPYTHON from sysconfig, whose LIBDIR points at the python
+# build/staging area; when cross compiling that is a build host directory
+# which does not exist on the target.  Keep only the library soname from
+# sysconfig and anchor it at the $(libdir) we are installing against.
+PYTHON3_LIBPYTHON_INSTALLED = $(libdir)/$(notdir $(PYTHON3_LIBPYTHON))
+
+$(TAPSET_PYTHON3_STPM):
+	mkdir -p tapset # create build-tree tapset/ dir if needed
+	@echo '@define stap_python3_libpython %("$(PYTHON3_LIBPYTHON_INSTALLED)" %)' > $@
 
 install: all
 	$(MAKE) $(AM_MAKEFLAGS) install-recursive
@@ -228,12 +284,12 @@ STAPLOG=staplog.so
 $(STAPLOG): staplog.c
 	$(CC) $(staplog_CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -shared -rdynamic \
 		$(AM_LDFLAGS) $(LDFLAGS) -fPIC -o $@ $<
-all-local: $(STAPLOG) example_index
+all-local: $(STAPLOG) example_index $(TAPSET_PYTHON3_STP)
 install-exec-local: $(STAPLOG)
 	$(MKDIR_P) $(DESTDIR)$(pkglibdir)
 	$(INSTALL) $(STAPLOG) $(DESTDIR)$(pkglibdir)
 else
-all-local: example_index
+all-local: example_index $(TAPSET_PYTHON3_STP)
 endif
 
 # Get extra libs as needed
@@ -264,8 +320,25 @@ endif
 		do $(INSTALL_DATA) -D $$f $(DESTDIR)$(pkgdatadir)/runtime/softfloat/$$f; done)
 	(cd $(srcdir)/runtime/linux; for f in *.[ch]; \
 		do $(INSTALL_DATA) -D $$f $(DESTDIR)$(pkgdatadir)/runtime/linux/$$f; done)
-	(cd $(srcdir)/tapset; find . \( -name '*.stp' -o -name '*.stpm' -o -name README \) -print \
+	(cd $(srcdir)/tapset; find . \( -name '*.stpm' -o -name README \) -print \
 		| while read f; do $(INSTALL_DATA) -D $$f $(DESTDIR)$(pkgdatadir)/tapset/$$f; done)
+	(cd $(srcdir)/tapset; find . -name '*.stp' ! -name 'python3*.stp' -print \
+		| while read f; do $(INSTALL_DATA) -D $$f $(DESTDIR)$(pkgdatadir)/tapset/$$f; done)
+	if test -n "$(TAPSET_PYTHON3_STPM)" && test -f "$(TAPSET_PYTHON3_STPM)"; then \
+	  $(INSTALL_DATA) -D "$(TAPSET_PYTHON3_STPM)" \
+	    "$(DESTDIR)$(pkgdatadir)/tapset/python3.stpm"; \
+	fi
+	if test -n "$(TAPSET_PYTHON3_STP)" && test -f "$(TAPSET_PYTHON3_STP)"; then \
+	  $(INSTALL_DATA) -D "$(TAPSET_PYTHON3_STP)" \
+	    "$(DESTDIR)$(pkgdatadir)/tapset/python3.stp"; \
+	fi
+# Prune stale versioned python3.NN.stp left by older installs.
+	-for f in $(DESTDIR)$(pkgdatadir)/tapset/python3*.stp; do \
+	  if test -f "$$f"; then \
+	    case $$f in */python3.stp) ;; *) rm -f "$$f";; esac; \
+	  fi; \
+	done
+	rm -f $(DESTDIR)$(pkgdatadir)/tapset/python2.stp
 	(cd $(srcdir)/testsuite/systemtap.examples; find . -type f -print \
 		| grep -E -v 'check.exp|ChangeLog|examples-index-gen.pl|html/.*\.tmpl|metadatabase.dbq$$' \
 		| while read f; do if test -x $$f; then \
@@ -296,6 +369,7 @@ clean-local:
 	rm -rf $(TEST_COV_DIR)
 	rm -rf stap.info
 	rm -rf staplog.so
+	rm -f tapset/python3.stp tapset/python3.stpm
 
 distclean-local:
 	rm -f doc/beginners/en-US doc/beginners/build/en-US/testsuite
@@ -326,9 +400,21 @@ endif
 SUBDIRS = . java python stapdyn staprun stapbpf doc man po stap-exporter interactive-notebook
 # NB: the gcov target above uses this to enumarate linked binaries' build directories
 DIST_SUBDIRS = testsuite $(SUBDIRS)
-EXTRA_DIST = m4/ChangeLog
+EXTRA_DIST = m4/ChangeLog \
+	tapset/python3.9.stp.candidate \
+	tapset/python3.12.stp.candidate \
+	tapset/python3.13.stp.candidate \
+	tapset/python3.14.stp.candidate \
+	tapset/python3.15.stp.candidate
+
+# Ensure no build-generated python3.stp / python3.stpm sneak into a source tarball.
+dist-hook:
+	rm -f $(distdir)/tapset/python3.stp $(distdir)/tapset/python3.stpm
 
 check-local:
+# SYSTEMTAP_TAPSET uses $(srcdir)/tapset (static tapsets only).  Build-generated
+# tapset/python3.stp and python3.stpm live in $(builddir)/tapset when srcdir !=
+# builddir; see the python tapset comment above.
 	SRCDIR=`cd $(srcdir); pwd`; \
         PWD=`pwd`; \
 	$(MAKE) -C testsuite check SYSTEMTAP_RUNTIME=$$SRCDIR/runtime SYSTEMTAP_TAPSET=$$SRCDIR/tapset LD_LIBRARY_PATH=$$LD_LIBRARY_PATH$${LD_LIBRARY_PATH:+:}$$PWD/lib-elfutils:$$PWD/lib-elfutils/systemtap SYSTEMTAP_PATH=$$PWD SYSTEMTAP_INCLUDES=$$PWD/includes RUNTESTFLAGS="$(RUNTESTFLAGS)" PKGLIBDIR="$(pkglibexecdir)";
@@ -395,12 +481,6 @@ update-po:
 	@echo if systemtam.pot is shown as modified ...
 	@echo
 	(cd $(srcdir)/po; git status *.pot)
-	@echo
-	@echo ... then check in with zanata ...
-	@echo
-	@echo % cd $(srcdir)
-	@echo % zanata-cli -B push -s po -t po
-	@echo % zanata-cli -B pull -s po -t po
 	@echo
 	@echo if the .po files are shown as modified ...
 	@echo

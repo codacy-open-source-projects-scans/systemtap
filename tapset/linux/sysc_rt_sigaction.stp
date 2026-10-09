@@ -51,8 +51,8 @@
 	sigsetsize = uint_arg(4)
 %)
 
-probe syscall.rt_sigaction = dw_syscall.rt_sigaction !, nd_syscall.rt_sigaction ? {}
-probe syscall.rt_sigaction.return = dw_syscall.rt_sigaction.return !,
+probe syscall.rt_sigaction = tp_syscall.rt_sigaction !, dw_syscall.rt_sigaction !, nd_syscall.rt_sigaction ? {}
+probe syscall.rt_sigaction.return = tp_syscall.rt_sigaction.return !, dw_syscall.rt_sigaction.return !,
                                     nd_syscall.rt_sigaction.return ? {}
 
 # dw_rt_sigaction _____________________________________________________
@@ -99,10 +99,10 @@ probe nd2_syscall.rt_sigaction = kprobe.function(@arch_syscall_prefix "sys_rt_si
         %( @_IS_SREG_KERNEL %? @_SYSCALL_RT_SIGACTION_REGARGS_STORE %)
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.rt_sigaction = kernel.trace("sys_enter")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.rt_sigaction = tp_syscall("rt_sigaction") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_gate(@const("__NR_rt_sigaction"))
 	@_SYSCALL_RT_SIGACTION_NAME
 	@_SYSCALL_RT_SIGACTION_REGARGS
@@ -115,7 +115,7 @@ probe tp_syscall.rt_sigaction = kernel.trace("sys_enter")
 probe nd_syscall.rt_sigaction.return = nd1_syscall.rt_sigaction.return!, nd2_syscall.rt_sigaction.return!, tp_syscall.rt_sigaction.return
   { }
   
-probe nd1_syscall.rt_sigaction.return =
+probe nd1_syscall.rt_sigaction.return = 
 	kprobe.function("sys_rt_sigaction").return ?
 {
 	@_SYSCALL_RT_SIGACTION_NAME
@@ -129,13 +129,13 @@ probe nd2_syscall.rt_sigaction.return = kprobe.function(@arch_syscall_prefix "sy
 	@SYSC_RETVALSTR(returnval())
 }
  
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.rt_sigaction.return = kernel.trace("sys_exit")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.rt_sigaction.return = tp_syscall("rt_sigaction").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_gate(@const("__NR_rt_sigaction"))
 	@_SYSCALL_RT_SIGACTION_NAME
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }
 
 # long sys32_rt_sigaction(int sig,
@@ -148,9 +148,9 @@ probe tp_syscall.rt_sigaction.return = kernel.trace("sys_exit")
 #			struct sigaction32 __user *oact,
 #			size_t sigsetsize)
 
-probe syscall.rt_sigaction32 = dw_syscall.rt_sigaction32 !,
+probe syscall.rt_sigaction32 = tp_syscall.rt_sigaction32 !, dw_syscall.rt_sigaction32 !,
                                nd_syscall.rt_sigaction32 ? {}
-probe syscall.rt_sigaction32.return = dw_syscall.rt_sigaction32.return !,
+probe syscall.rt_sigaction32.return = tp_syscall.rt_sigaction32.return !, dw_syscall.rt_sigaction32.return !,
                                       nd_syscall.rt_sigaction32.return ? {}
 
 # dw_rt_sigaction32 _____________________________________________________
@@ -202,10 +202,10 @@ probe nd2_syscall.rt_sigaction32 =
         %( @_IS_SREG_KERNEL %? @_SYSCALL_RT_SIGACTION_REGARGS_STORE %)
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.rt_sigaction32 = kernel.trace("sys_enter")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.rt_sigaction32 = tp_syscall("~compat_rt_sigaction") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__compat_syscall_gate(@const("__NR_compat_rt_sigaction"))
 	@_SYSCALL_RT_SIGACTION_NAME
 	@_SYSCALL_RT_SIGACTION32_REGARGS
@@ -218,7 +218,7 @@ probe tp_syscall.rt_sigaction32 = kernel.trace("sys_enter")
 probe nd_syscall.rt_sigaction32.return = nd1_syscall.rt_sigaction32.return!, nd2_syscall.rt_sigaction32.return!, tp_syscall.rt_sigaction32.return
   { }
   
-probe nd1_syscall.rt_sigaction32.return =
+probe nd1_syscall.rt_sigaction32.return = 
 	kprobe.function("sys32_rt_sigaction").return ?,
 	kprobe.function("compat_sys_rt_sigaction").return ?
 {
@@ -234,11 +234,11 @@ probe nd2_syscall.rt_sigaction32.return =
 	@SYSC_RETVALSTR(returnval())
 }
  
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.rt_sigaction32.return = kernel.trace("sys_exit")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.rt_sigaction32.return = tp_syscall("~compat_rt_sigaction").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__compat_syscall_gate(@const("__NR_compat_rt_sigaction"))
 	@_SYSCALL_RT_SIGACTION_NAME
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }

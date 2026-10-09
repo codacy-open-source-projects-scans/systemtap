@@ -402,7 +402,7 @@ void
 init_bpf_helper_tables ()
 {
 #define __BPF_SET_FUNC_NAME(x) bpf_func_name_map[BPF_FUNC_ ## x] = #x
-#define __BPF_SET_FUNC_ID(x) bpf_func_id_map[#x] = BPF_FUNC_ ## x
+#define __BPF_SET_FUNC_ID(x) bpf_func_id_map[#x] = (bpf_func_id)(BPF_FUNC_ ## x)
   __BPF_FUNC_MAPPER(__BPF_SET_FUNC_NAME)
   __STAPBPF_FUNC_MAPPER(__BPF_SET_FUNC_NAME)
   __BPF_FUNC_MAPPER(__BPF_SET_FUNC_ID)
@@ -791,7 +791,7 @@ insn_after_inserter::insert(insn *p)
 }
 
 program::program(enum bpf_target target)
-  : target(target), hardreg_vals(MAX_BPF_REG),
+  : target(target), xdp_mode(false), hardreg_vals(MAX_BPF_REG),
     max_tmp_space(0), max_reg_space(0)
 {
   for (unsigned i = 0; i < MAX_BPF_REG; ++i)

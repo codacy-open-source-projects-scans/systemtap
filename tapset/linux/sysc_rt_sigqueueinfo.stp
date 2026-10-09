@@ -36,9 +36,9 @@
 %)
 
 
-probe syscall.rt_sigqueueinfo = dw_syscall.rt_sigqueueinfo !,
+probe syscall.rt_sigqueueinfo = tp_syscall.rt_sigqueueinfo !, dw_syscall.rt_sigqueueinfo !,
                                 nd_syscall.rt_sigqueueinfo ? {}
-probe syscall.rt_sigqueueinfo.return = dw_syscall.rt_sigqueueinfo.return !,
+probe syscall.rt_sigqueueinfo.return = tp_syscall.rt_sigqueueinfo.return !, dw_syscall.rt_sigqueueinfo.return !,
                                        nd_syscall.rt_sigqueueinfo.return ? {}
 
 # dw_rt_sigqueueinfo _____________________________________________________
@@ -80,7 +80,7 @@ probe __syscall.rt_sigqueueinfo.return =
 probe nd_syscall.rt_sigqueueinfo = nd1_syscall.rt_sigqueueinfo!, nd2_syscall.rt_sigqueueinfo!, tp_syscall.rt_sigqueueinfo
   { }
 
-probe nd1_syscall.rt_sigqueueinfo =
+probe nd1_syscall.rt_sigqueueinfo = 
 	__nd1_syscall.rt_sigqueueinfo ?,
 	kprobe.function("sys32_rt_sigqueueinfo") ?,
 	kprobe.function("compat_sys_rt_sigqueueinfo") ?
@@ -90,7 +90,7 @@ probe nd1_syscall.rt_sigqueueinfo =
 	@_SYSCALL_RT_SIGQUEUEINFO_REGARGS
 	@_SYSCALL_RT_SIGQUEUEINFO_ARGSTR
 }
-probe __nd1_syscall.rt_sigqueueinfo = kprobe.function("sys_rt_sigqueueinfo")
+probe __nd1_syscall.rt_sigqueueinfo = kprobe.function("sys_rt_sigqueueinfo") ?
 {
 	@__syscall_gate(@const("__NR_rt_sigqueueinfo"))
 }
@@ -109,10 +109,10 @@ probe nd2_syscall.rt_sigqueueinfo =
         %( @_IS_SREG_KERNEL %? @_SYSCALL_RT_SIGQUEUEINFO_REGARGS_STORE %)
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.rt_sigqueueinfo = kernel.trace("sys_enter")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.rt_sigqueueinfo = tp_syscall("rt_sigqueueinfo,~compat_rt_sigqueueinfo") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_compat_gate(@const("__NR_rt_sigqueueinfo"), @const("__NR_compat_rt_sigqueueinfo"))
 	@_SYSCALL_RT_SIGQUEUEINFO_NAME
 	@_SYSCALL_RT_SIGQUEUEINFO_REGARGS
@@ -125,7 +125,7 @@ probe tp_syscall.rt_sigqueueinfo = kernel.trace("sys_enter")
 probe nd_syscall.rt_sigqueueinfo.return = nd1_syscall.rt_sigqueueinfo.return!, nd2_syscall.rt_sigqueueinfo.return!, tp_syscall.rt_sigqueueinfo.return
   { }
   
-probe nd1_syscall.rt_sigqueueinfo.return =
+probe nd1_syscall.rt_sigqueueinfo.return = 
 	__nd1_syscall.rt_sigqueueinfo.return ?,
 	kprobe.function("sys32_rt_sigqueueinfo").return ?,
 	kprobe.function("compat_sys_rt_sigqueueinfo").return ?
@@ -133,8 +133,8 @@ probe nd1_syscall.rt_sigqueueinfo.return =
 	@_SYSCALL_RT_SIGQUEUEINFO_NAME
 	@SYSC_RETVALSTR(returnval())
 }
-probe __nd1_syscall.rt_sigqueueinfo.return =
-	kprobe.function("sys_rt_sigqueueinfo").return
+probe __nd1_syscall.rt_sigqueueinfo.return = 
+	kprobe.function("sys_rt_sigqueueinfo").return ?
 {
 	@__syscall_gate(@const("__NR_rt_sigqueueinfo"))
 }
@@ -148,11 +148,11 @@ probe nd2_syscall.rt_sigqueueinfo.return =
 	@SYSC_RETVALSTR(returnval())
 }
  
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.rt_sigqueueinfo.return = kernel.trace("sys_exit")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.rt_sigqueueinfo.return = tp_syscall("rt_sigqueueinfo,~compat_rt_sigqueueinfo").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_compat_gate(@const("__NR_rt_sigqueueinfo"), @const("__NR_compat_rt_sigqueueinfo"))
 	@_SYSCALL_RT_SIGQUEUEINFO_NAME
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }

@@ -63,8 +63,8 @@
 	  set_pointer_arg(5, arg)
 %)
 
-probe syscall.semctl = dw_syscall.semctl !, nd_syscall.semctl ? {}
-probe syscall.semctl.return = dw_syscall.semctl.return !,
+probe syscall.semctl = tp_syscall.semctl !, dw_syscall.semctl !, nd_syscall.semctl ? {}
+probe syscall.semctl.return = tp_syscall.semctl.return !, dw_syscall.semctl.return !,
                               nd_syscall.semctl.return ? {}
 
 # dw_semctl _____________________________________________________
@@ -113,10 +113,10 @@ probe nd2_syscall.semctl = kprobe.function(@arch_syscall_prefix "sys_semctl") ?
         %( @_IS_SREG_KERNEL %? @_SYSCALL_SEMCTL_REGARGS_STORE %)
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.semctl = kernel.trace("sys_enter")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.semctl = tp_syscall("semctl") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_gate(@const("__NR_semctl"))
 	@_SYSCALL_SEMCTL_NAME
 	@_SYSCALL_SEMCTL_REGARGS
@@ -143,13 +143,13 @@ probe nd2_syscall.semctl.return = kprobe.function(@arch_syscall_prefix "sys_semc
 	@SYSC_RETVALSTR(returnval())
 }
  
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.semctl.return = kernel.trace("sys_exit")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.semctl.return = tp_syscall("semctl").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_gate(@const("__NR_semctl"))
 	@_SYSCALL_SEMCTL_NAME
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }
 
 # compat_sys_semctl ________________________________________
@@ -160,9 +160,9 @@ probe tp_syscall.semctl.return = kernel.trace("sys_exit")
 #	u32, third, compat_uptr_t, ptr, u32, fifth)
 #
 
-probe syscall.compat_sys_semctl = dw_syscall.compat_sys_semctl !,
+probe syscall.compat_sys_semctl = tp_syscall.compat_sys_semctl !, dw_syscall.compat_sys_semctl !,
                                   nd_syscall.compat_sys_semctl ? {}
-probe syscall.compat_sys_semctl.return = dw_syscall.compat_sys_semctl.return !,
+probe syscall.compat_sys_semctl.return = tp_syscall.compat_sys_semctl.return !, dw_syscall.compat_sys_semctl.return !,
                                          nd_syscall.compat_sys_semctl.return ? {}
 
 # dw_compat_sys_semctl _____________________________________________________
@@ -246,10 +246,10 @@ probe nd2_syscall.compat_sys_semctl =
         %( @_IS_SREG_KERNEL %? @_SYSCALL_IPC_SEMCTL_REGARGS_STORE %)
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.compat_sys_semctl = kernel.trace("sys_exit")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.compat_sys_semctl = kernel.tracepoint("sys_exit")!, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__compat_syscall_gate(@const("__NR_compat_ipc"))
 	if (int_arg(1) != @const("SEMCTL")) next;
 	@_SYSCALL_SEMCTL_NAME
@@ -263,19 +263,19 @@ probe tp_syscall.compat_sys_semctl = kernel.trace("sys_exit")
 probe nd_syscall.compat_sys_semctl.return = nd1_syscall.compat_sys_semctl.return!, nd2_syscall.compat_sys_semctl.return!, tp_syscall.compat_sys_semctl.return
   { }
   
-probe nd1_syscall.compat_sys_semctl.return =
+probe nd1_syscall.compat_sys_semctl.return = 
 	__nd1_syscall.compat_semctl.return ?,
 	__nd1_syscall.compat_ipc.semctl.return ?
 {
 	@_SYSCALL_SEMCTL_NAME
 	@SYSC_RETVALSTR(returnval())
 }
-probe __nd1_syscall.compat_semctl.return =
+probe __nd1_syscall.compat_semctl.return = 
 	kprobe.function("compat_sys_semctl").return ?
 {
 	@__compat_syscall_gate_negative(@const("__NR_compat_ipc"))
 }
-probe __nd1_syscall.compat_ipc.semctl.return =
+probe __nd1_syscall.compat_ipc.semctl.return = 
 	kprobe.function("compat_sys_ipc").return ?,
 	kprobe.function("sys32_ipc").return ?
 {
@@ -292,12 +292,12 @@ probe nd2_syscall.compat_sys_semctl.return =
 	@SYSC_RETVALSTR(returnval())
 }
  
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.compat_sys_semctl.return = kernel.trace("sys_exit")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.compat_sys_semctl.return = tp_syscall("~compat_ipc").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__compat_syscall_gate(@const("__NR_compat_ipc"))
 	if (int_arg(1) != @const("SEMCTL")) next;
 	@_SYSCALL_SEMCTL_NAME
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }

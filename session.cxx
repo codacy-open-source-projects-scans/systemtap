@@ -86,8 +86,10 @@ systemtap_session::systemtap_session ():
   timer_derived_probes(0),
   netfilter_derived_probes(0),
   profile_derived_probes(0),
-  mark_derived_probes(0),
   tracepoint_derived_probes(0),
+  syscall_dispatch_derived_probes(0),
+  lsm_derived_probes(0),
+  xdp_derived_probes(0),
   hrtimer_derived_probes(0),
   procfs_derived_probes(0),
   dynprobe_derived_probes(0),
@@ -148,6 +150,8 @@ systemtap_session::systemtap_session ():
   save_uprobes = false;
   modname_given = false;
   keep_tmpdir = false;
+  semantic_keep_going = false;
+  debug_build = false;
   cmd = "";
   target_pid = 0;
   use_cache = true;
@@ -293,8 +297,10 @@ systemtap_session::systemtap_session (const systemtap_session& other,
   timer_derived_probes(0),
   netfilter_derived_probes(0),
   profile_derived_probes(0),
-  mark_derived_probes(0),
   tracepoint_derived_probes(0),
+  syscall_dispatch_derived_probes(0),
+  lsm_derived_probes(0),
+  xdp_derived_probes(0),
   hrtimer_derived_probes(0),
   procfs_derived_probes(0),
   dynprobe_derived_probes(0),
@@ -353,6 +359,9 @@ systemtap_session::systemtap_session (const systemtap_session& other,
   save_uprobes = other.save_uprobes;
   modname_given = other.modname_given;
   keep_tmpdir = other.keep_tmpdir;
+  semantic_keep_going = other.semantic_keep_going;
+  // Do not copy saved_semantic_errors into remote child sessions.
+  debug_build = other.debug_build;
   cmd = other.cmd;
   target_pid = other.target_pid; // XXX almost surely nonsense for multiremote
   use_cache = other.use_cache;
@@ -507,14 +516,14 @@ systemtap_session::version_string ()
 pair <string,string>
 systemtap_session::kernel_version_range()
 {
-  return make_pair<string,string>("3.10", "7.0");    // PRERELEASE
+  return make_pair<string,string>("3.10", "7.3.0-rc3");    // PRERELEASE
 }
 
 void
 systemtap_session::version ()
 {
   cout << _F("Systemtap translator/driver (version %s)\n"
-             "Copyright (C) 2005-2025 Red Hat, Inc. and others\n"   // PRERELEASE
+             "Copyright (C) 2005-2026 Red Hat, Inc. and others\n"   // PRERELEASE
              "This is free software; see the source for copying conditions.\n",
              version_string().c_str());
   auto vr = kernel_version_range();
@@ -533,11 +542,11 @@ systemtap_session::version ()
 #ifdef HAVE_BPF_DECLS
        << " BPF"
 #endif
+#ifdef HAVE_LIBBPF
+       << " LIBBPF"
+#endif
 #ifdef HAVE_JAVA
        << " JAVA"
-#endif
-#ifdef HAVE_PYTHON2_PROBES
-       << " PYTHON2"
 #endif
 #ifdef HAVE_PYTHON3_PROBES
        << " PYTHON3"
@@ -647,6 +656,8 @@ systemtap_session::usage (int exitcode)
   cout
     << _F("   -D NM=VAL  emit macro definition into generated C code\n"
     "   -B NM=VAL  pass option to kbuild make\n"
+    "   --debug    build module with extra debugging info\n"
+    "              (CONFIG_DEBUG_INFO=y, -g, -save-temps, run pahole)\n"
     "   --modinfo NM=VAL\n"
     "              include a MODULE_INFO(NM,VAL) in the generated C code\n"
     "   -G VAR=VAL set global variable to value\n"
@@ -713,6 +724,9 @@ systemtap_session::usage (int exitcode)
     "              substitute zero for bad context $variables\n"
     "   --suppress-handler-errors\n"
     "              catch all runtime errors, quietly skip probe handlers\n"
+    "   --semantic-keep-going\n"
+    "              like make -k for pass 2: continue after semantic errors,\n"
+    "              dump a machine-parseable error catalog, still fail if any\n"
     "   --use-server[=SERVER-SPEC]\n"
     "              specify systemtap compile-servers\n"
     "   --list-servers[=PROPERTIES]\n"
@@ -1106,6 +1120,19 @@ systemtap_session::parse_cmdline (int argc, char * const argv [])
           kbuildflags.push_back (string (optarg));
 	  break;
 
+	case LONG_OPT_DEBUG:
+          if (client_options) { cerr << _F("ERROR: %s invalid with %s", "--debug", "--client-options") << endl; return 1; } 
+	  server_args.push_back ("--debug");
+          debug_build = true;
+          keep_tmpdir = true; /* --debug implies -k so .i/.s/.pahole etc. are not nuked */
+          use_script_cache = false; /* analogous to -k, for usable build tree with temps */
+	  break;
+
+	case LONG_OPT_SEMANTIC_KEEP_GOING:
+	  semantic_keep_going = true;
+	  server_args.push_back ("--semantic-keep-going");
+	  break;
+
 	case LONG_OPT_VERSION:
 	  version ();
 	  throw exit_exception (EXIT_SUCCESS);
@@ -1450,16 +1477,11 @@ systemtap_session::parse_cmdline (int argc, char * const argv [])
 	    cerr << _F("Unable to convert rlimit-as resource limit '%s'.", optarg) << endl;
 	    return 1;
 	  }
-	  if(setrlimit (RLIMIT_AS, & our_rlimit)) {
-	    int saved_errno = errno;
-	    cerr << _F("Unable to set resource limits for rlimit-as : %s", strerror (errno)) << endl;
-	    if (saved_errno != EPERM)
-	      return 1;
-	  }
+	  rlimits[RLIMIT_AS] = our_rlimit;
 
           /* Disable core dumps, since exhaustion results in uncaught bad_alloc etc. exceptions */
 	  our_rlimit.rlim_max = our_rlimit.rlim_cur = 0;
-	  (void) setrlimit (RLIMIT_CORE, & our_rlimit);
+	  rlimits[RLIMIT_CORE] = our_rlimit;
 	  break;
 
 	case LONG_OPT_RLIMIT_CPU:
@@ -1475,12 +1497,7 @@ systemtap_session::parse_cmdline (int argc, char * const argv [])
 	    cerr << _F("Unable to convert resource limit '%s' for rlimit-cpu", optarg) << endl;
 	    return 1;
 	  }
-	  if(setrlimit (RLIMIT_CPU, & our_rlimit)) {
-	    int saved_errno = errno;
-	    cerr << _F("Unable to set resource limits for rlimit-cpu : %s", strerror (errno)) << endl;
-	    if (saved_errno != EPERM)
-	      return 1;
-	  }
+	  rlimits[RLIMIT_CPU] = our_rlimit;
 	  break;
 
 	case LONG_OPT_RLIMIT_NPROC:
@@ -1496,12 +1513,7 @@ systemtap_session::parse_cmdline (int argc, char * const argv [])
 	    cerr << _F("Unable to convert resource limit '%s' for rlimit-nproc", optarg) << endl;
 	    return 1;
 	  }
-	  if(setrlimit (RLIMIT_NPROC, & our_rlimit)) {
-	    int saved_errno = errno;
-	    cerr << _F("Unable to set resource limits for rlimit-nproc : %s", strerror (errno)) << endl;
-	    if (saved_errno != EPERM)
-	      return 1;
-	  }
+	  rlimits[RLIMIT_NPROC] = our_rlimit;
 	  break;
 
 	case LONG_OPT_RLIMIT_STACK:
@@ -1517,16 +1529,11 @@ systemtap_session::parse_cmdline (int argc, char * const argv [])
 	    cerr << _F("Unable to convert resource limit '%s' for rlimit-stack", optarg) << endl;
 	    return 1;
 	  }
-	  if(setrlimit (RLIMIT_STACK, & our_rlimit)) {
-	    int saved_errno = errno;
-	    cerr << _F("Unable to set resource limits for rlimit-stack : %s", strerror (errno)) << endl;
-	    if (saved_errno != EPERM)
-	      return 1;
-	  }
+	  rlimits[RLIMIT_STACK] = our_rlimit;
 
           /* Disable core dumps, since exhaustion results in SIGSEGV */
 	  our_rlimit.rlim_max = our_rlimit.rlim_cur = 0;
-	  (void) setrlimit (RLIMIT_CORE, & our_rlimit);
+	  rlimits[RLIMIT_CORE] = our_rlimit;
 	  break;
 
 	case LONG_OPT_RLIMIT_FSIZE:
@@ -1542,12 +1549,7 @@ systemtap_session::parse_cmdline (int argc, char * const argv [])
 	    cerr << _F("Unable to convert resource limit '%s' for rlimit-fsize", optarg) << endl;
 	    return 1;
 	  }
-	  if(setrlimit (RLIMIT_FSIZE, & our_rlimit)) {
-	    int saved_errno = errno;
-	    cerr << _F("Unable to set resource limits for rlimit-fsize : %s", strerror (errno)) << endl;
-	    if (saved_errno != EPERM)
-	      return 1;
-	  }
+	  rlimits[RLIMIT_FSIZE] = our_rlimit;
 	  break;
 
 	case LONG_OPT_SYSROOT:
@@ -1782,6 +1784,33 @@ systemtap_session::parse_cmdline (int argc, char * const argv [])
   return 0;
 }
 
+int
+systemtap_session::apply_rlimits ()
+{
+  for (std::map<int, struct rlimit>::iterator it = rlimits.begin(); it != rlimits.end(); ++it)
+    {
+      if (setrlimit (it->first, & it->second))
+        {
+          int saved_errno = errno;
+          string resource_name;
+          switch (it->first)
+            {
+            case RLIMIT_AS: resource_name = "rlimit-as"; break;
+            case RLIMIT_CPU: resource_name = "rlimit-cpu"; break;
+            case RLIMIT_NPROC: resource_name = "rlimit-nproc"; break;
+            case RLIMIT_STACK: resource_name = "rlimit-stack"; break;
+            case RLIMIT_FSIZE: resource_name = "rlimit-fsize"; break;
+            case RLIMIT_CORE: resource_name = "rlimit-core"; break;
+            default: resource_name = lex_cast(it->first); break;
+            }
+          cerr << _F("Unable to set resource limits for %s: %s", resource_name.c_str(), strerror (saved_errno)) << endl;
+          if (saved_errno != EPERM)
+            return 1;
+        }
+    }
+  return 0;
+}
+
 bool
 systemtap_session::parse_cmdline_runtime (const string& opt_runtime)
 {
@@ -1905,8 +1934,12 @@ systemtap_session::check_options (int argc, char * const argv [])
 
   // ignore any -E bits in list modes; their presence could flip the
   // process result code even if list results are empty
-  if (dump_mode)
-    additional_scripts.clear();
+  // NB: We no longer clear additional_scripts here, because doing so breaks
+  // listing-mode alias tests (e.g. stap -l pb -E "probe pb=..."). Instead, we
+  // handle BZ1795159/PR11443 by properly checking is_primary_probe() inside
+  // semantic_pass() in elaborate.cxx.
+  // if (dump_mode)
+  //   additional_scripts.clear();
 
 #if ! HAVE_NSS
   if (client_options)
@@ -2469,6 +2502,14 @@ systemtap_session::print_token (ostream& o, const token* tok)
 void
 systemtap_session::print_error (const semantic_error& se)
 {
+  std::lock_guard<std::mutex> g (print_warning_mutex);
+
+  // Always record a full copy when keep-going is on, even if human
+  // stderr later suppresses duplicates by errsrc.  Tokens/messages in
+  // the saved object give per-site coordinates for the dump catalog.
+  if (semantic_keep_going)
+    saved_semantic_errors.push_back (se);
+
   // skip error message printing for listing mode with low verbosity
   if (this->dump_mode && this->verbose <= 1)
     {
@@ -2489,6 +2530,60 @@ systemtap_session::print_error (const semantic_error& se)
           }
     }
   else suppressed_errors++;
+}
+
+void
+systemtap_session::dump_saved_semantic_errors ()
+{
+  // Machine-oriented catalog for testsuite / tooling.  Tab-separated:
+  //   SEMANTIC_ERROR <file> <line> <column> <token> <message>
+  // Token is tok1->content (e.g. identifier name), or "-" if none.
+  // Message/token tabs/newlines are flattened so Tcl can split on \t.
+  cerr << "SEMANTIC_ERRORS: " << saved_semantic_errors.size() << endl;
+  for (size_t i = 0; i < saved_semantic_errors.size(); i++)
+    {
+      for (const semantic_error *e = &saved_semantic_errors[i];
+           e != 0; e = e->get_chain())
+        {
+          string file = "-";
+          string tokcontent = "-";
+          unsigned line = 0, col = 0;
+          // Prefer tok2 for identity when present (e.g. function name
+          // alongside an embedded-code tok1).
+          const token* idtok = e->tok2 ? e->tok2 : e->tok1;
+          if (idtok)
+            {
+              tokcontent = string (idtok->content);
+              if (idtok->location.file)
+                {
+                  file = idtok->location.file->name;
+                  line = idtok->location.line;
+                  col = idtok->location.column;
+                }
+            }
+          else if (e->tok1 && e->tok1->location.file)
+            {
+              file = e->tok1->location.file->name;
+              line = e->tok1->location.line;
+              col = e->tok1->location.column;
+            }
+          string msg = e->what();
+          for (size_t j = 0; j < msg.size(); j++)
+            if (msg[j] == '\t' || msg[j] == '\n' || msg[j] == '\r')
+              msg[j] = ' ';
+          for (size_t j = 0; j < tokcontent.size(); j++)
+            if (tokcontent[j] == '\t' || tokcontent[j] == '\n'
+                || tokcontent[j] == '\r')
+              tokcontent[j] = ' ';
+          cerr << "SEMANTIC_ERROR\t" << file
+               << "\t" << line
+               << "\t" << col
+               << "\t" << tokcontent
+               << "\t" << msg
+               << endl;
+        }
+    }
+  cerr << "SEMANTIC_ERRORS_END" << endl;
 }
 
 string
@@ -2613,6 +2708,8 @@ systemtap_session::print_error_details (std::ostream& message,
 void
 systemtap_session::print_warning (const string& message_str, const token* tok)
 {
+  std::lock_guard<std::mutex> g (print_warning_mutex);
+
   // Only output in dump mode if -vv is supplied:
   if (suppress_warnings && (!dump_mode || verbose <= 1))
     return; // NB: don't count towards suppressed_warnings count
@@ -2637,6 +2734,8 @@ systemtap_session::print_error (const parse_error &pe,
                                 const std::string &input_name,
                                 bool is_warningerr)
 {
+  std::lock_guard<std::mutex> g (print_warning_mutex);
+
   // duplicate elimination
   if (verbose > 0 || seen_errors[pe.errsrc_chain()] < 1)
     {
@@ -2754,7 +2853,10 @@ systemtap_session::remove_tmp_dir()
     return;
 
   // Remove temporary directory
-  if (keep_tmpdir && !tmpdir_opt_set)
+  // --debug implies keep (like -k) so that build artifacts (.i/.s from
+  // -save-temps, .pahole, etc.) are not automatically nuked.
+  bool keep = keep_tmpdir || debug_build;
+  if (keep && !tmpdir_opt_set)
       clog << _F("Keeping temporary directory \"%s\"", tmpdir.c_str()) << endl;
   else if (!tmpdir_opt_set)
     {

@@ -2,12 +2,12 @@
 .\"     Title: probe::nfs.proc.open
 .\"    Author: 
 .\" Generator: DocBook XSL Stylesheets vsnapshot <http://docbook.sf.net/>
-.\"      Date: October 2025
+.\"      Date: September 2026
 .\"    Manual: Network File Storage Tapsets
-.\"    Source: SystemTap Tapset Reference
+.\"    Source: SystemTap Tapset Reference Version 5.6
 .\"  Language: English
 .\"
-.TH "PROBE::NFS\&.PROC\&." "3stap" "October 2025" "SystemTap Tapset Reference" "Network File Storage Tapsets"
+.TH "PROBE::NFS\&.PROC\&." "3stap" "September 2026" "SystemTap Tapset Reference Ver" "Network File Storage Tapsets"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -32,23 +32,18 @@ probe::nfs.proc.open \- NFS client allocates file read/write context information
 .SH "SYNOPSIS"
 .sp
 .nf
-nfs\&.proc\&.open 
+probe nfs\&.proc\&.open {}
 .fi
 .SH "VALUES"
-.PP
-\fImode\fR
-.RS 4
-file mode
-.RE
-.PP
-\fIprot\fR
-.RS 4
-transfer protocol
-.RE
 .PP
 \fIserver_ip\fR
 .RS 4
 IP address of server
+.RE
+.PP
+\fIflag\fR
+.RS 4
+file flag
 .RE
 .PP
 \fIfilename\fR
@@ -56,9 +51,14 @@ IP address of server
 file name
 .RE
 .PP
-\fIflag\fR
+\fIprot\fR
 .RS 4
-file flag
+transfer protocol
+.RE
+.PP
+\fImode\fR
+.RS 4
+file mode
 .RE
 .PP
 \fIversion\fR

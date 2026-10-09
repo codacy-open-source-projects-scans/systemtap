@@ -1,3 +1,4 @@
+afteryou.h
 analysis.cxx
 analysis.h
 bpf-base.cxx
@@ -12,8 +13,6 @@ buildrun.cxx
 buildrun.h
 cache.cxx
 cache.h
-client-http.cxx
-client-http.h
 client-nss.cxx
 client-nss.h
 cmdline.cxx
@@ -97,7 +96,6 @@ tapset-been.cxx
 tapset-debuginfod.cxx
 tapset-dynprobe.cxx
 tapset-dynprobe.h
-tapset-mark.cxx
 tapset-method.cxx
 tapset-netfilter.cxx
 tapset-perfmon.cxx
@@ -109,6 +107,8 @@ tapset-timers.cxx
 tapset-utrace.cxx
 task_finder.cxx
 task_finder.h
+tracepoint-vmlinux.cxx
+tracepoint-vmlinux.h
 translate.cxx
 translate.h
 translator-output.cxx

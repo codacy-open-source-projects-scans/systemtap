@@ -2,12 +2,12 @@
 .\"     Title: probe::scsi.iodispatching
 .\"    Author: 
 .\" Generator: DocBook XSL Stylesheets vsnapshot <http://docbook.sf.net/>
-.\"      Date: October 2025
+.\"      Date: September 2026
 .\"    Manual: SCSI Tapset
-.\"    Source: SystemTap Tapset Reference
+.\"    Source: SystemTap Tapset Reference Version 5.6
 .\"  Language: English
 .\"
-.TH "PROBE::SCSI\&.IODISP" "3stap" "October 2025" "SystemTap Tapset Reference" "SCSI Tapset"
+.TH "PROBE::SCSI\&.IODISP" "3stap" "September 2026" "SystemTap Tapset Reference Ver" "SCSI Tapset"
 .\" -----------------------------------------------------------------
 .\" * Define some portability stuff
 .\" -----------------------------------------------------------------
@@ -32,38 +32,23 @@ probe::scsi.iodispatching \- SCSI mid\-layer dispatched low\-level SCSI command
 .SH "SYNOPSIS"
 .sp
 .nf
-scsi\&.iodispatching 
+probe scsi\&.iodispatching {}
 .fi
 .SH "VALUES"
-.PP
-\fIrequest_buffer\fR
-.RS 4
-The request buffer address
-.RE
-.PP
-\fIrequest_bufflen\fR
-.RS 4
-The request buffer length
-.RE
 .PP
 \fIdevice_state\fR
 .RS 4
 The current state of the device
 .RE
 .PP
+\fIlun\fR
+.RS 4
+The lun number
+.RE
+.PP
 \fIdevice_state_str\fR
 .RS 4
 The current state of the device, as a string
-.RE
-.PP
-\fIdata_direction\fR
-.RS 4
-The data_direction specifies whether this command is from/to the device 0 (DMA_BIDIRECTIONAL), 1 (DMA_TO_DEVICE), 2 (DMA_FROM_DEVICE), 3 (DMA_NONE)
-.RE
-.PP
-\fIreq_addr\fR
-.RS 4
-The current struct request pointer, as a number
 .RE
 .PP
 \fIchannel\fR
@@ -81,14 +66,29 @@ The scsi device id
 The host number
 .RE
 .PP
+\fIdata_direction\fR
+.RS 4
+The data_direction specifies whether this command is from/to the device 0 (DMA_BIDIRECTIONAL), 1 (DMA_TO_DEVICE), 2 (DMA_FROM_DEVICE), 3 (DMA_NONE)
+.RE
+.PP
+\fIreq_addr\fR
+.RS 4
+The current struct request pointer, as a number
+.RE
+.PP
+\fIrequest_buffer\fR
+.RS 4
+The request buffer address
+.RE
+.PP
+\fIrequest_bufflen\fR
+.RS 4
+The request buffer length
+.RE
+.PP
 \fIdata_direction_str\fR
 .RS 4
 Data direction, as a string
-.RE
-.PP
-\fIlun\fR
-.RS 4
-The lun number
 .RE
 .SH SEE ALSO\n 
 .IR tapset::scsi (3stap)

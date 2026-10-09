@@ -34,13 +34,13 @@
 	env_str = __get_compat_argv(pointer_arg(3), 0)
 %)
 
-probe syscall.execve = dw_syscall.execve !, nd_syscall.execve {}
-probe syscall.execve.return = dw_syscall.execve.return !,
+probe syscall.execve = tp_syscall.execve !, dw_syscall.execve !, nd_syscall.execve {}
+probe syscall.execve.return = tp_syscall.execve.return !, dw_syscall.execve.return !,
                               nd_syscall.execve.return {}
 
-probe syscall.compat_execve = dw_syscall.compat_execve !,
+probe syscall.compat_execve = tp_syscall.compat_execve !, dw_syscall.compat_execve !,
                               nd_syscall.compat_execve ? {}
-probe syscall.compat_execve.return = dw_syscall.compat_execve.return !,
+probe syscall.compat_execve.return = tp_syscall.compat_execve.return !, dw_syscall.compat_execve.return !,
                                      nd_syscall.compat_execve.return ? {}
 
 # dw_execve _____________________________________________________
@@ -92,7 +92,7 @@ probe dw_syscall.compat_execve.return =
 probe nd_syscall.execve = nd1_syscall.execve!, nd2_syscall.execve!, tp_syscall.execve
   { }
 
-probe nd1_syscall.execve = kprobe.function("sys_execve")
+probe nd1_syscall.execve = kprobe.function("sys_execve") ?
 {
 	@_SYSCALL_EXECVE_NAME
 	asmlinkage()
@@ -109,10 +109,10 @@ probe nd2_syscall.execve = kprobe.function(@arch_syscall_prefix "sys_execve") ?
 	@_SYSCALL_EXECVE_ARGSTR
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.execve = kernel.trace("sys_enter")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.execve = tp_syscall("execve") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_gate(@const("__NR_execve"))
 	@_SYSCALL_EXECVE_NAME
 	@_SYSCALL_EXECVE_REGARGS
@@ -122,7 +122,7 @@ probe tp_syscall.execve = kernel.trace("sys_enter")
 probe nd_syscall.execve.return = nd1_syscall.execve.return!, nd2_syscall.execve.return!, tp_syscall.execve.return
   { }
   
-probe nd1_syscall.execve.return = kprobe.function("sys_execve").return
+probe nd1_syscall.execve.return = kprobe.function("sys_execve").return ?
 {
 	@_SYSCALL_EXECVE_NAME
 	@SYSC_RETVALSTR(returnval())
@@ -135,13 +135,13 @@ probe nd2_syscall.execve.return = kprobe.function(@arch_syscall_prefix "sys_exec
 	@SYSC_RETVALSTR(returnval())
 }
  
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.execve.return = kernel.trace("sys_exit")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.execve.return = tp_syscall("execve").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__syscall_gate(@const("__NR_execve"))
 	@_SYSCALL_EXECVE_NAME
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }
 
 # In kernels >= 3.7, compat_sys_execve() has been moved to generic
@@ -172,10 +172,10 @@ probe nd2_syscall.compat_execve = kprobe.function(@arch_syscall_prefix "compat_s
 	@_SYSCALL_EXECVE_ARGSTR
 }
 
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.compat_execve = kernel.trace("sys_enter")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.compat_execve = tp_syscall("~compat_execve") !, kernel.trace("sys_enter")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__compat_syscall_gate(@const("__NR_compat_execve"))
 	@_SYSCALL_EXECVE_NAME
 	@_SYSCALL_COMPAT_EXECVE_REGARGS
@@ -185,7 +185,7 @@ probe tp_syscall.compat_execve = kernel.trace("sys_enter")
 probe nd_syscall.compat_execve.return = nd1_syscall.compat_execve.return!, nd2_syscall.compat_execve.return!, tp_syscall.compat_execve.return
   { }
   
-probe nd1_syscall.compat_execve.return =
+probe nd1_syscall.compat_execve.return = 
 	kprobe.function("compat_sys_execve").return ?
 {
 	@_SYSCALL_EXECVE_NAME
@@ -199,12 +199,12 @@ probe nd2_syscall.compat_execve.return = kprobe.function(@arch_syscall_prefix "c
 	@SYSC_RETVALSTR(returnval())
 }
  
-/* kernel 3.5+, but undesirable because it affects all syscalls */
-probe tp_syscall.compat_execve.return = kernel.trace("sys_exit")
+/* BTF sys_enter/sys_exit dispatcher, else kernel.trace fallback. */
+probe tp_syscall.compat_execve.return = tp_syscall("~compat_execve").return !, kernel.trace("sys_exit")
 {
-	__set_syscall_pt_regs($regs)
+	@__set_syscall_pt_regs
 	@__compat_syscall_gate(@const("__NR_compat_execve"))
 	@_SYSCALL_EXECVE_NAME
-	@SYSC_RETVALSTR($ret)
+	@SYSC_RETVALSTR_TP
 }
 %)
