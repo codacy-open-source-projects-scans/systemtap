@@ -45,7 +45,9 @@ Security band-aid:
 - [ ] Decide mitigation style: correct data, or induce the error path
 - [ ] Stand up a matching environment (container for userspace, VM for kernel)
       and note the affected / fixed package NVRs
-- [ ] Draft the script; test against a real reproducer with stap -g -c CMD
+- [ ] Build the vulnerable version from source; keep a fixed build for A/B
+- [ ] Draft the script; run the four-way test (see "Four-way validation"):
+      unfixed, fixed, unfixed+band-aid, fix_p=0
 - [ ] Embed the advisory link, upstream commit id, and the hunk being mirrored
 - [ ] Confirm the fix is off/on toggleable and counts metrics
 - [ ] Add cve-YYYY-NNNN.stp under security-band-aids/
@@ -85,6 +87,14 @@ listed in the triage skill). Translate whichever one applies into handler code:
 Mirror the patch's *semantics*, not its phrasing. Keep magic numbers explained
 by a comment (`-95` // `EOPNOTSUPP`).
 
+When the fix's guard can double as the payload's predicate and cannot
+hold on trees that already carry the fix, write the handler to no-op
+there: one artifact then serves mixed fixed/unfixed fleets, the
+fixed+band-aid validation arm reduces to a silence check, and hit
+metrics stay at zero where nothing needed doing (cve-2026-89969
+clamps only when `left > capacity - offset`, which upstream's check
+makes impossible).
+
 ### Find probe points and variables
 
 Prefer the narrowest point that sees the suspect value, in this order:
@@ -104,6 +114,16 @@ instead of failing elaboration. Keep at least one always-available probe (for
 example a `timer.s` status line) so the script still has something to attach
 to.
 
+A fourth rung lives between function boundaries and statement probes:
+source labels.  `module("nvmet_tcp").function("f").label("recv")` fires
+wherever control passes the label — loop-head fallthrough and `goto`
+alike — and survives the backports that shift every line number
+(cve-2026-89969's `recv:` is textually identical from v5.10 to v7.3).
+Reachability beats precision: a label on the data's path beats a
+line-exact `.statement`.  By the same token prefer writing struct
+fields (`$q->left`) over locals: fields have stable addresses, while
+locals depend on DWARF location lists at that pc.
+
 Discover what is actually available on the target host — the deployed binary
 is fully optimized, so inlining, reordering, register allocation and DWARF
 location lists decide what is visible:
@@ -121,7 +141,10 @@ mitigation. Note in the script comment which variables the mitigation needs.
 If the condition is expressible from syscall/LSM-level arguments alone, prefer
 the BPF runtime (`#!/usr/bin/env -S stap -g --runtime=bpf`, `probe lsm.*`) so the
 band-aid works on hosts without the module-loading toolchain — see
-`cve-2026-31431bpf.stp` next to the module-runtime twin.
+`cve-2026-31431bpf.stp` next to the module-runtime twin.  The bpf
+backend knows `$return` but no general target-variable writes, so
+data-patch bandaids stay on the kernel-module runtime; bpf suits the
+trace/notify shape.
 
 ### Pick the mitigation style
 
@@ -211,6 +234,19 @@ Kernel targets need a VM: a container inherits the host kernel, so the guest's
 own build is what is actually under test. Take a cloud image whose shipped
 kernel predates the fix, then compare against the updated one. Record both NVRs.
 
+Single-module fixes can skip the VM.  When bug and fix live in one
+loadable module, rebuild it from the affected tag with the fix
+reverted, against the running kernel's devel tree (`make -C
+/lib/modules/$(uname -r)/build M=...` — vermagic and symbol CRCs then
+match), `rmmod`/`insmod` it over the stock one, and let stock play the
+fixed arm: the whole four-way on one host.  Two snags.  Configfs/sysfs
+state pins the module (nvmet ports, subsystem links — tear down before
+`rmmod`).  And stap resolves probe DWARF via the on-disk image, so the
+post-swap build-id check fails pass 5 until the rebuild — which
+inherits the distro `CONFIG_DEBUG_INFO` and carries its own DWARF —
+replaces the stock file at its `/lib/modules` path.  Back the original
+up, restore it afterwards; the swap is the experiment.
+
 Record the version boundary while setting this up, since it belongs in the
 commit message and in the `.meta` description:
 
@@ -242,6 +278,53 @@ stap -g --remote guest cve-YYYY-NNNN.stp              # or: passes 1-4 here, run
 Otherwise install `kernel-debuginfo` matching `uname -r` in the guest itself and
 check what the probe sees: `stap -L 'kernel.function("skb_try_coalesce")'`.
 
+### Four-way validation: build the vulnerable version
+
+Do not trust a mitigation that has only ever run against a fixed library.
+**Build the vulnerable upstream version from source**, and validate the
+band-aid with a four-way comparison on the same reproducer:
+
+1. **unfixed** — vulnerable build alone. Confirms the reproducer actually
+   shows the bug on this host (wrong result, crash, failed assertion). If
+   this arm passes, the reproducer or the version choice is wrong.
+2. **fixed** — vulnerable build + the upstream commit cherry-picked. Proves
+   the reproducer detects the *fix*, not just any perturbation, and pins
+   the expected-good behavior the band-aid must reproduce.
+3. **unfixed + band-aid** — vulnerable build with the band-aid attached
+   (`stap -g cve.stp -c CMD`). The same checks as arm 2 must pass.
+   Run once more with `cve_fix_p=1` replaced by `-G cve_fix_p=0`
+   (or the procfs knob) to confirm the *payload*, not merely the probe
+   firing, does the work.
+
+The upstream fix's regression tests are usually the best reproducer: pick
+them out of the fix commit (they often apply to the vulnerable tag with
+`git cherry-pick` or a test-only diff), and build them into the vulnerable
+tree. A `-p4`-clean script whose counters never move, or which "passes"
+because the probes never fire, is worth less than one validated this way.
+
+Source trees are cheap; prefer a bare clone plus `git worktree` per arm over
+duplicate checkouts, and a private `--prefix` install per arm so the A/B
+only differs by the library under test (see `openssl-4.0.2` arms A/B for
+CVE-2026-84782):
+
+```bash
+git clone --bare --single-branch --branch v4.0.2 \
+    https://github.com/their/project.git ~/project.git
+git --git-dir=~/project.git worktree add --detach ~/proj-fix  FIXTAG
+git --git-dir=~/project.git worktree add --detach ~/proj-vuln  v4.0.2
+# per-arm: ./Configure --prefix=~/sslA --debug; make; make install_sw
+```
+
+When the band-aid's probe paths are `process("/lib...")` globs, make a
+test copy of the script with the glob retargeted at the private prefix
+(`process("~/ssl?/lib64/libssl.so*")`); keep the committed script pointing
+at the system paths. The band-aid's own `stap -p2` against the local build
+also proves the debuginfo story before any runtime test.
+
+Record the three arms and their outcomes in the commit message — it is the
+cheapest way to make the claim "validated against the vulnerable version"
+auditable later.
+
 ### Test against a reproducer
 
 Write the smallest thing that shows the bug, then compare before/after. Use
@@ -261,7 +344,10 @@ non-interactive test loops.
 
 Check all four quadrants: hostile input is neutralized, ordinary input still
 works, `cve_fix_p=0` leaves the original behavior visible, and
-`cve_enabled_p=0` costs about nothing. Iterate trace-only first (`cve_fix_p=0`)
+`cve_enabled_p=0` costs about nothing. This is in addition to the mandatory
+four-way build comparison above — running against a host's already-fixed
+system library proves nothing about the payload. Iterate trace-only first
+(`cve_fix_p=0`)
 to confirm the probe fires on realistic traffic and sees the expected values,
 then turn the payload on. Watch `stap -p2` output for unresolved probe points
 or `$` variables before claiming success, and check
@@ -273,6 +359,15 @@ reloading:
 ```bash
 echo 0 > /proc/systemtap/CVE_YYYY_NNNN/cve_fix_p
 ```
+
+Two harness nits from practice: stap spends tens of seconds in passes
+1-4 before `staprun` gets going, so poll for `/proc/systemtap/NAME/`
+before writing knobs — and without `-m NAME` the module (and its
+procdir) is auto-named `stap_<hash>`, so pass `-m` explicitly whenever
+the test drives knobs.  And without KASAN, give the unfixed arm a
+behavioral fingerprint instead: a stomped flag or counter surfaces
+later as a dmesg complaint or a changed disconnect, which is observable
+enough for the four-way.
 
 ### Carry the upstream reference
 
@@ -422,6 +517,6 @@ EOF
 ```
 
 Keep the message focused on why it is in-tree (education / emergency
-reference), link the advisory, and state the affected / fixed package pair the
-band-aid was checked against, so a later reader can tell when it became
-redundant.
+reference), link the advisory, and state the affected / fixed package pair —
+and the four-way validation result — so a later reader can tell when the
+band-aid became redundant and why it was believed to work.
